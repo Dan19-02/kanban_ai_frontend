@@ -8,6 +8,8 @@ type GroupBy = 'assignee' | 'priority' | 'dueDate';
 interface KanbanBoardProps {
   items: ActionItem[];
   canEdit: boolean;
+  /** Optional quick filter applied alongside search. Default shows everything. */
+  filter?: 'all' | 'completed' | 'high';
   onItemMove: (itemId: string, newAssignee: string) => void;
   onItemUpdate: (itemId: string, updates: Partial<ActionItem>) => void;
   onItemDelete: (itemId: string) => void;
@@ -36,7 +38,7 @@ function dueBucket(dueDate?: string): { key: string; label: string } {
 
 const DUE_ORDER = ['overdue', 'today', 'week', 'later', 'none'] as const;
 
-export function KanbanBoard({ items, canEdit, onItemMove, onItemUpdate, onItemDelete }: KanbanBoardProps) {
+export function KanbanBoard({ items, canEdit, filter = 'all', onItemMove, onItemUpdate, onItemDelete }: KanbanBoardProps) {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [groupBy, setGroupBy] = useState<GroupBy>('assignee');
@@ -89,10 +91,12 @@ export function KanbanBoard({ items, canEdit, onItemMove, onItemUpdate, onItemDe
 
   const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase();
-    return items.filter(
-      (item) => item.title.toLowerCase().includes(query) || item.assignee.toLowerCase().includes(query),
-    );
-  }, [items, searchQuery]);
+    return items.filter((item) => {
+      if (filter === 'completed' && item.status !== 'completed') return false;
+      if (filter === 'high' && item.priority !== 'High') return false;
+      return item.title.toLowerCase().includes(query) || item.assignee.toLowerCase().includes(query);
+    });
+  }, [items, searchQuery, filter]);
 
   // Columns for the active grouping. Keys come from ALL items (so columns stay
   // stable while searching); each column's cards come from the filtered set.
@@ -109,22 +113,22 @@ export function KanbanBoard({ items, canEdit, onItemMove, onItemUpdate, onItemDe
     }
 
     if (groupBy === 'dueDate') {
-      const present = new Set(items.map((i) => dueBucket(i.dueDate).key));
+      const present = new Set(filteredItems.map((i) => dueBucket(i.dueDate).key));
       return DUE_ORDER.filter((k) => present.has(k)).map((k) => ({
         key: k,
-        label: dueBucket(items.find((i) => dueBucket(i.dueDate).key === k)?.dueDate).label,
+        label: dueBucket(filteredItems.find((i) => dueBucket(i.dueDate).key === k)?.dueDate).label,
         items: cardsWhere((i) => dueBucket(i.dueDate).key === k),
       }));
     }
 
     // assignee (default) — keep Unassigned last, then alphabetical
-    const names = Array.from(new Set(items.map((i) => i.assignee))).sort((a, b) => {
+    const names = Array.from(new Set(filteredItems.map((i) => i.assignee))).sort((a, b) => {
       if (a === 'Unassigned') return 1;
       if (b === 'Unassigned') return -1;
       return a.localeCompare(b);
     });
     return names.map((key) => ({ key, label: key, items: cardsWhere((i) => i.assignee === key) }));
-  }, [items, filteredItems, groupBy]);
+  }, [filteredItems, groupBy]);
 
   const avatarColors = [
     'bg-blue-100 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-300',
@@ -166,9 +170,13 @@ export function KanbanBoard({ items, canEdit, onItemMove, onItemUpdate, onItemDe
         </div>
       </div>
 
-      {!items || items.length === 0 ? (
+      {items.length === 0 ? (
         <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800/50 min-h-[400px] m-4 transition-colors">
           <p className="text-slate-500 dark:text-slate-400 font-medium text-sm">No action items to display.</p>
+        </div>
+      ) : columns.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800/50 min-h-[400px] m-4 transition-colors">
+          <p className="text-slate-500 dark:text-slate-400 font-medium text-sm">No items match your search or filter.</p>
         </div>
       ) : (
         <div className="flex gap-6 overflow-x-auto overflow-y-hidden items-start w-full flex-1 p-4">

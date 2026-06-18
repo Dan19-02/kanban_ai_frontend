@@ -5,12 +5,12 @@ import {
   Brain, Columns3, MessageSquare, FileText,
 } from 'lucide-react';
 import { Header } from '../components/Header';
-import { TranscriptInput } from '../components/TranscriptInput';
+import { TranscriptInput, type SectionFocus } from '../components/TranscriptInput';
 import { KanbanBoard } from '../components/KanbanBoard';
 import { CommentsSection } from '../components/CommentsSection';
 import { ShareModal } from '../components/ShareModal';
 import { SetNameModal } from '../components/SetNameModal';
-import { BoardSummaryBar } from '../components/BoardSummaryBar';
+import { BoardSummaryBar, type SummaryKey } from '../components/BoardSummaryBar';
 import { useBoard } from '../hooks/useBoard';
 import { useAuth } from '../auth/AuthContext';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -18,6 +18,14 @@ import { api, ApiError } from '../api/client';
 import type { ActionItem, ShareInfo } from '../types';
 
 type MobileTab = 'brain' | 'board' | 'comments';
+
+// Summary-bar chips that filter the Kanban board (the rest jump to an AI-Brain section).
+const BOARD_FILTERS: Partial<Record<SummaryKey, 'all' | 'completed' | 'high'>> = {
+  tasks: 'all',
+  done: 'completed',
+  high: 'high',
+  people: 'all',
+};
 
 // CSV/formula-injection-safe cell: neutralize a leading = + - @ / tab / CR, then
 // quote-escape per RFC 4180. Used for all CSV exports.
@@ -118,6 +126,25 @@ function BoardView({ boardId }: { boardId: string }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [quotaExceeded, setQuotaExceeded] = useState(false);
   const [showShare, setShowShare] = useState(false);
+  const [boardFilter, setBoardFilter] = useState<'all' | 'completed' | 'high'>('all');
+  const [focusSection, setFocusSection] = useState<SectionFocus | null>(null);
+  const focusNonce = useRef(0);
+
+  // A summary-bar chip either filters the board or expands/jumps to an AI-Brain
+  // section. On mobile we also switch to the relevant tab.
+  const handleChip = (key: SummaryKey) => {
+    const f = BOARD_FILTERS[key];
+    if (f) {
+      setBoardFilter((cur) => (cur === f && f !== 'all' ? 'all' : f));
+      if (!isDesktop) setMobileTab('board');
+    } else {
+      focusNonce.current += 1;
+      setFocusSection({ key, nonce: focusNonce.current });
+      if (!isDesktop) setMobileTab('brain');
+    }
+  };
+  const activeChip: SummaryKey | null =
+    boardFilter === 'completed' ? 'done' : boardFilter === 'high' ? 'high' : null;
 
   const handleAnalyze = async (transcript: string) => {
     setIsAnalyzing(true);
@@ -212,6 +239,7 @@ function BoardView({ boardId }: { boardId: string }) {
           isAnalyzing={isAnalyzing}
           analysis={board}
           canEdit={canEdit}
+          focus={focusSection}
         />
       </div>
       {actionError && (
@@ -258,6 +286,7 @@ function BoardView({ boardId }: { boardId: string }) {
         <KanbanBoard
           items={board.actionItems}
           canEdit={canEdit}
+          filter={boardFilter}
           onItemMove={(itemId, assignee) => wrap(moveItem(itemId, assignee))}
           onItemUpdate={(itemId, updates: Partial<ActionItem>) => wrap(updateItem(itemId, updates))}
           onItemDelete={(itemId) => wrap(deleteItem(itemId))}
@@ -337,7 +366,7 @@ function BoardView({ boardId }: { boardId: string }) {
       />
 
       <main className="flex-1 min-h-0 p-4 md:p-6 flex flex-col overflow-hidden transition-colors">
-        {hasReport && <BoardSummaryBar board={board} />}
+        {hasReport && <BoardSummaryBar board={board} onSelect={handleChip} activeKey={activeChip} />}
         {isDesktop ? (
           <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
             <div className="col-span-3 min-h-0">{transcriptPanel}</div>

@@ -1,16 +1,75 @@
-import React, { useState } from 'react';
-import { Loader2, Sparkles, Send, BrainCircuit, HeartPulse, ShieldCheck, Brain, AlertTriangle, Workflow, OctagonAlert, CircleHelp } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Loader2, Send, BrainCircuit, HeartPulse, ShieldCheck, Brain, AlertTriangle,
+  Workflow, OctagonAlert, CircleHelp, ChevronDown, type LucideIcon,
+} from 'lucide-react';
 import { MeetingAnalysis } from '../types';
+
+/** Which AI-Brain section to expand + scroll to. `nonce` changes per request so
+ *  repeated clicks on the same section re-trigger the effect. */
+export interface SectionFocus {
+  key: string;
+  nonce: number;
+}
 
 interface TranscriptInputProps {
   onAnalyze: (transcript: string) => Promise<void>;
   isAnalyzing: boolean;
   analysis: MeetingAnalysis | null;
   canEdit: boolean;
+  focus?: SectionFocus | null;
 }
 
-export function TranscriptInput({ onAnalyze, isAnalyzing, analysis, canEdit }: TranscriptInputProps) {
+interface SectionProps {
+  icon: LucideIcon;
+  title: string;
+  titleClass: string;
+  count?: number;
+  open: boolean;
+  onToggle: () => void;
+  innerRef?: (el: HTMLDivElement | null) => void;
+  children: React.ReactNode;
+}
+
+/** A collapsible block within the AI Brain panel. */
+function Section({ icon: Icon, title, titleClass, count, open, onToggle, innerRef, children }: SectionProps) {
+  return (
+    <div
+      ref={innerRef}
+      className="border-t border-indigo-200/60 dark:border-indigo-800/30 pt-3 mt-3 first:border-t-0 first:pt-0 first:mt-0 scroll-mt-2"
+    >
+      <button type="button" onClick={onToggle} className="w-full flex items-center justify-between gap-2 text-left">
+        <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${titleClass}`}>
+          <Icon className="w-3.5 h-3.5 shrink-0" /> {title}
+          {count != null && <span className="font-semibold opacity-60">({count})</span>}
+        </span>
+        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
+      </button>
+      {open && <div className="mt-2">{children}</div>}
+    </div>
+  );
+}
+
+export function TranscriptInput({ onAnalyze, isAnalyzing, analysis, canEdit, focus }: TranscriptInputProps) {
   const [text, setText] = useState('');
+  // Summary + sentiment open by default; the lists start collapsed (counts shown).
+  const [open, setOpen] = useState<Record<string, boolean>>({ summary: true, sentiment: true });
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const toggle = (k: string) => setOpen((s) => ({ ...s, [k]: !s[k] }));
+  const setRef = (k: string) => (el: HTMLDivElement | null) => {
+    sectionRefs.current[k] = el;
+  };
+
+  // When a summary-bar chip asks to focus a section, expand it and scroll to it.
+  useEffect(() => {
+    if (!focus) return;
+    setOpen((s) => ({ ...s, [focus.key]: true }));
+    const id = requestAnimationFrame(() => {
+      sectionRefs.current[focus.key]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [focus]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,6 +85,8 @@ export function TranscriptInput({ onAnalyze, isAnalyzing, analysis, canEdit }: T
     return 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800';
   };
 
+  const listClass = 'list-disc pl-4 space-y-1.5 text-sm text-slate-700 dark:text-slate-300';
+
   return (
     <div className="flex flex-col h-full w-full bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden transition-colors">
       <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-between shrink-0">
@@ -37,91 +98,114 @@ export function TranscriptInput({ onAnalyze, isAnalyzing, analysis, canEdit }: T
 
       <div className="flex-1 p-4 flex flex-col gap-4 overflow-y-auto bg-white dark:bg-slate-900 min-h-0 transition-colors">
         {analysis?.summary && (
-          <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/30 rounded-xl p-4 shrink-0 flex flex-col gap-4">
-            <div>
-              <h3 className="text-xs font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <BrainCircuit className="w-3.5 h-3.5" /> Executive Summary
-              </h3>
+          <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/30 rounded-xl p-4 shrink-0 flex flex-col">
+            <Section
+              icon={BrainCircuit}
+              title="Executive Summary"
+              titleClass="text-indigo-700 dark:text-indigo-300"
+              open={!!open.summary}
+              onToggle={() => toggle('summary')}
+              innerRef={setRef('summary')}
+            >
               <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{analysis.summary}</p>
-            </div>
-            
+            </Section>
+
             {analysis.sentimentInfo && (
-              <div className="pt-3 border-t border-indigo-200/60 dark:border-indigo-800/30">
-                <h3 className="text-xs font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <HeartPulse className="w-3.5 h-3.5" /> Sentiment Analysis
-                </h3>
+              <Section
+                icon={HeartPulse}
+                title="Sentiment"
+                titleClass="text-indigo-700 dark:text-indigo-300"
+                open={!!open.sentiment}
+                onToggle={() => toggle('sentiment')}
+                innerRef={setRef('sentiment')}
+              >
                 <div className="flex items-center gap-2 mb-2">
                   <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${getSentimentColor(analysis.sentimentInfo.score)}`}>
                     {analysis.sentimentInfo.score}
                   </span>
                 </div>
                 <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{analysis.sentimentInfo.breakdown}</p>
-              </div>
-            )}
-            
-            {analysis.keyDecisions && analysis.keyDecisions.length > 0 && (
-              <div className="pt-3 border-t border-indigo-200/60 dark:border-indigo-800/30">
-                <h3 className="text-xs font-bold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5" /> Key Decisions
-                </h3>
-                <ul className="list-disc pl-4 space-y-1.5 text-sm text-slate-700 dark:text-slate-300">
-                  {analysis.keyDecisions.map((decision, i) => (
-                    <li key={i}>{decision}</li>
-                  ))}
-                </ul>
-              </div>
+              </Section>
             )}
 
-            {analysis.risks && analysis.risks.length > 0 && (
-              <div className="pt-3 border-t border-indigo-200/60 dark:border-indigo-800/30">
-                <h3 className="text-xs font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5" /> Risks
-                </h3>
-                <ul className="list-disc pl-4 space-y-1.5 text-sm text-slate-700 dark:text-slate-300">
-                  {analysis.risks.map((risk, i) => (
-                    <li key={i}>{risk}</li>
-                  ))}
+            {!!analysis.keyDecisions?.length && (
+              <Section
+                icon={ShieldCheck}
+                title="Key Decisions"
+                titleClass="text-indigo-700 dark:text-indigo-300"
+                count={analysis.keyDecisions.length}
+                open={!!open.decisions}
+                onToggle={() => toggle('decisions')}
+                innerRef={setRef('decisions')}
+              >
+                <ul className={listClass}>
+                  {analysis.keyDecisions.map((d, i) => <li key={i}>{d}</li>)}
                 </ul>
-              </div>
+              </Section>
             )}
 
-            {analysis.blockers && analysis.blockers.length > 0 && (
-              <div className="pt-3 border-t border-indigo-200/60 dark:border-indigo-800/30">
-                <h3 className="text-xs font-bold text-red-700 dark:text-red-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <OctagonAlert className="w-3.5 h-3.5" /> Blockers
-                </h3>
-                <ul className="list-disc pl-4 space-y-1.5 text-sm text-slate-700 dark:text-slate-300">
-                  {analysis.blockers.map((b, i) => (
-                    <li key={i}>{b}</li>
-                  ))}
+            {!!analysis.risks?.length && (
+              <Section
+                icon={AlertTriangle}
+                title="Risks"
+                titleClass="text-amber-700 dark:text-amber-300"
+                count={analysis.risks.length}
+                open={!!open.risks}
+                onToggle={() => toggle('risks')}
+                innerRef={setRef('risks')}
+              >
+                <ul className={listClass}>
+                  {analysis.risks.map((r, i) => <li key={i}>{r}</li>)}
                 </ul>
-              </div>
+              </Section>
             )}
 
-            {analysis.dependencies && analysis.dependencies.length > 0 && (
-              <div className="pt-3 border-t border-indigo-200/60 dark:border-indigo-800/30">
-                <h3 className="text-xs font-bold text-sky-700 dark:text-sky-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <Workflow className="w-3.5 h-3.5" /> Dependencies
-                </h3>
-                <ul className="list-disc pl-4 space-y-1.5 text-sm text-slate-700 dark:text-slate-300">
-                  {analysis.dependencies.map((dep, i) => (
-                    <li key={i}>{dep}</li>
-                  ))}
+            {!!analysis.blockers?.length && (
+              <Section
+                icon={OctagonAlert}
+                title="Blockers"
+                titleClass="text-red-700 dark:text-red-300"
+                count={analysis.blockers.length}
+                open={!!open.blockers}
+                onToggle={() => toggle('blockers')}
+                innerRef={setRef('blockers')}
+              >
+                <ul className={listClass}>
+                  {analysis.blockers.map((b, i) => <li key={i}>{b}</li>)}
                 </ul>
-              </div>
+              </Section>
             )}
 
-            {analysis.openQuestions && analysis.openQuestions.length > 0 && (
-              <div className="pt-3 border-t border-indigo-200/60 dark:border-indigo-800/30">
-                <h3 className="text-xs font-bold text-fuchsia-700 dark:text-fuchsia-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <CircleHelp className="w-3.5 h-3.5" /> Open Questions
-                </h3>
-                <ul className="list-disc pl-4 space-y-1.5 text-sm text-slate-700 dark:text-slate-300">
-                  {analysis.openQuestions.map((q, i) => (
-                    <li key={i}>{q}</li>
-                  ))}
+            {!!analysis.dependencies?.length && (
+              <Section
+                icon={Workflow}
+                title="Dependencies"
+                titleClass="text-sky-700 dark:text-sky-300"
+                count={analysis.dependencies.length}
+                open={!!open.dependencies}
+                onToggle={() => toggle('dependencies')}
+                innerRef={setRef('dependencies')}
+              >
+                <ul className={listClass}>
+                  {analysis.dependencies.map((d, i) => <li key={i}>{d}</li>)}
                 </ul>
-              </div>
+              </Section>
+            )}
+
+            {!!analysis.openQuestions?.length && (
+              <Section
+                icon={CircleHelp}
+                title="Open Questions"
+                titleClass="text-fuchsia-700 dark:text-fuchsia-300"
+                count={analysis.openQuestions.length}
+                open={!!open.questions}
+                onToggle={() => toggle('questions')}
+                innerRef={setRef('questions')}
+              >
+                <ul className={listClass}>
+                  {analysis.openQuestions.map((q, i) => <li key={i}>{q}</li>)}
+                </ul>
+              </Section>
             )}
           </div>
         )}
