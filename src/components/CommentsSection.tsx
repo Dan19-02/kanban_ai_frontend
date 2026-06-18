@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { Send, MessageSquare } from 'lucide-react';
+import { Send, MessageSquare, ChevronRight } from 'lucide-react';
 import { Comment } from '../types';
 
 interface CommentsSectionProps {
   comments: Comment[];
   canEdit: boolean;
   onAddComment: (text: string) => void;
+  /** When provided, shows a collapse button in the header (desktop). */
+  onCollapse?: () => void;
 }
 
 const AVATAR_COLORS = [
@@ -34,7 +36,7 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
-export function CommentsSection({ comments, canEdit, onAddComment }: CommentsSectionProps) {
+export function CommentsSection({ comments, canEdit, onAddComment, onCollapse }: CommentsSectionProps) {
   const [text, setText] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -52,9 +54,21 @@ export function CommentsSection({ comments, canEdit, onAddComment }: CommentsSec
           <MessageSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
           Team Comments
         </h2>
-        <span className="text-xs font-medium bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full">
-          {comments?.length || 0}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-medium bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full">
+            {comments?.length || 0}
+          </span>
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              title="Collapse comments"
+              aria-label="Collapse comments"
+              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-md transition-colors"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 p-4 flex flex-col gap-4 overflow-y-auto bg-white dark:bg-slate-900 min-h-0 transition-colors">
