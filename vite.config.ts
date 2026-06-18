@@ -1,22 +1,34 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
-import {defineConfig} from 'vite';
+import { defineConfig } from 'vite';
 
-export default defineConfig(() => {
-  return {
-    plugins: [react(), tailwindcss()],
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
+// The backend (API + Socket.IO) the dev server proxies to. Override with
+// BACKEND_URL when running the API on a non-default host/port.
+const BACKEND_URL = process.env.BACKEND_URL ?? 'http://localhost:3000';
+
+// In production the built assets are served by the backend from the same
+// origin, so the app always talks to a same-origin `/api` and `/socket.io`.
+// In development we proxy those paths to the separately-running backend.
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': { target: BACKEND_URL, changeOrigin: true },
+      '/socket.io': { target: BACKEND_URL, changeOrigin: true, ws: true },
+    },
+  },
+  build: {
+    // Split rarely-changing vendor code into separate chunks so the CDN can
+    // cache them independently across deploys and the initial payload shrinks.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          motion: ['motion'],
+          socket: ['socket.io-client'],
+        },
       },
     },
-    server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
-      hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
-    },
-  };
+  },
 });

@@ -1,0 +1,32 @@
+# Render Blueprint — Frontend (Static Site)
+#
+# Deploy: Render Dashboard → New → Blueprint → select THIS (frontend) repo.
+# This builds the Vite app to a CDN-served static site and talks to the
+# separately-deployed backend Web Service over HTTPS.
+services:
+  - type: web
+    name: kanban-ai-frontend
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    # Backend origin — Vite inlines it into the bundle at build time. Also set
+    # in .env.production; change both together if the backend URL changes.
+    envVars:
+      - key: VITE_API_URL
+        value: https://kanban-ai-akx1.onrender.com
+    # SPA fallback: serve index.html for any client-side route.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    # Baseline security headers for the static assets.
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin

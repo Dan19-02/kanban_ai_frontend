@@ -127,24 +127,30 @@ function BoardView({ boardId }: { boardId: string }) {
   const downloadCSV = (platform: 'trello' | 'jira') => {
     const items = board?.actionItems ?? [];
     if (items.length === 0) return;
-    let csv = 'data:text/csv;charset=utf-8,';
-    if (platform === 'jira') {
-      csv += 'Summary,Assignee,Issue Type\n';
-      items.forEach((item) => {
-        csv += `"${item.title.replace(/"/g, '""')}","${item.assignee.replace(/"/g, '""')}",Task\n`;
-      });
-    } else {
-      csv += 'Title,List (Assignee)\n';
-      items.forEach((item) => {
-        csv += `"${item.title.replace(/"/g, '""')}","${item.assignee.replace(/"/g, '""')}"\n`;
-      });
-    }
+
+    // Guard against CSV/formula injection: spreadsheet apps execute a cell
+    // whose value begins with = + - @ or a tab/CR. Item titles and assignees
+    // come from AI output and free-text user input, so neutralize them by
+    // prefixing a single quote, then quote-escape per RFC 4180.
+    const cell = (value: string): string => {
+      const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+      return `"${guarded.replace(/"/g, '""')}"`;
+    };
+
+    const rows: string[] =
+      platform === 'jira'
+        ? ['Summary,Assignee,Issue Type', ...items.map((i) => `${cell(i.title)},${cell(i.assignee)},Task`)]
+        : ['Title,List (Assignee)', ...items.map((i) => `${cell(i.title)},${cell(i.assignee)}`)];
+
+    const blob = new Blob([rows.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodeURI(csv));
-    link.setAttribute('download', `${platform}-export.csv`);
+    link.href = url;
+    link.download = `${platform}-export.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   if (loading) {

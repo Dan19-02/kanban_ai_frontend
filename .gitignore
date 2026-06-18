@@ -4,5 +4,9 @@ dist/
 coverage/
 .DS_Store
 *.log
+
+# Local env files are ignored (they may hold secrets). The committed ones below
+# contain only non-secret build config (the public backend URL).
 .env*
 !.env.example
+!.env.production

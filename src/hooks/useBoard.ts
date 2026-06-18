@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { api, ApiError } from '../api/client';
+import { api, ApiError, API_BASE } from '../api/client';
 import type { ActionItem, Board, MeetingAnalysis, PresenceUser, ViewerInfo } from '../types';
 
 interface UseBoardResult {
@@ -53,9 +53,13 @@ export function useBoard(boardId: string): UseBoardResult {
     };
   }, [boardId]);
 
-  // Live updates over the authenticated socket.
+  // Live updates over the authenticated socket. In production the socket
+  // connects to the backend origin (API_BASE); in development API_BASE is
+  // empty, so it connects same-origin and the Vite dev server proxies it.
   useEffect(() => {
-    const socket = io({ withCredentials: true });
+    const socket = API_BASE
+      ? io(API_BASE, { withCredentials: true })
+      : io({ withCredentials: true });
     socketRef.current = socket;
 
     socket.on('connect', () => {

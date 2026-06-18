@@ -21,8 +21,13 @@ export class ApiError extends Error {
   }
 }
 
+// Base URL of the backend API. Empty in development (requests go to the
+// same-origin `/api`, which the Vite dev server proxies to the backend).
+// In production set VITE_API_URL to the deployed backend's origin.
+export const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE}/api${path}`, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
     ...options,

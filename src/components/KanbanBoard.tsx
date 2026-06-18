@@ -125,7 +125,11 @@ export function KanbanBoard({ items, canEdit, onItemMove, onItemUpdate, onItemDe
                         layoutId={item.id}
                         key={item.id}
                         draggable={canEdit}
-                        onDragStart={(e: React.DragEvent) => canEdit && handleDragStart(e, item.id)}
+                        // motion.div types onDragStart as a pan-gesture handler, but with
+                        // `draggable` the browser fires a native HTML5 DragEvent at runtime.
+                        onDragStart={(e) => {
+                          if (canEdit) handleDragStart(e as unknown as React.DragEvent, item.id);
+                        }}
                         className={`bg-white dark:bg-slate-800 flex flex-col gap-2 p-4 rounded-xl shadow-sm border ${item.status === 'completed' ? 'border-transparent opacity-60 bg-slate-50 dark:bg-slate-800/50' : 'border-slate-200 dark:border-slate-700'} ${canEdit ? 'cursor-grab active:cursor-grabbing' : ''} hover:border-slate-300 dark:hover:border-slate-600 transition-all group relative shrink-0`}
                       >
                         {canEdit && (
