@@ -6,6 +6,8 @@ export interface ActionItem {
   status?: 'pending' | 'completed';
   priority?: 'High' | 'Medium' | 'Low';
   dueDate?: string;
+  /** Titles of other tasks that must finish before this one. */
+  blockedBy?: string[];
 }
 
 export interface SentimentInfo {

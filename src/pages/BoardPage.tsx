@@ -10,6 +10,7 @@ import { KanbanBoard } from '../components/KanbanBoard';
 import { CommentsSection } from '../components/CommentsSection';
 import { ShareModal } from '../components/ShareModal';
 import { SetNameModal } from '../components/SetNameModal';
+import { BoardSummaryBar } from '../components/BoardSummaryBar';
 import { useBoard } from '../hooks/useBoard';
 import { useAuth } from '../auth/AuthContext';
 import { useMediaQuery } from '../hooks/useMediaQuery';
@@ -334,14 +335,15 @@ function BoardView({ boardId }: { boardId: string }) {
       />
 
       <main className="flex-1 min-h-0 p-4 md:p-6 flex flex-col overflow-hidden transition-colors">
+        {hasReport && <BoardSummaryBar board={board} />}
         {isDesktop ? (
-          <div className="grid grid-cols-12 gap-6 h-full min-h-0">
+          <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
             <div className="col-span-3 min-h-0">{transcriptPanel}</div>
             <div className="col-span-6 min-h-0">{boardPanel}</div>
             <div className="col-span-3 min-h-0">{commentsPanel}</div>
           </div>
         ) : (
-          <div className="flex flex-col h-full min-h-0">
+          <div className="flex flex-col flex-1 min-h-0">
             <div className="shrink-0 grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
               <MobileTabButton active={mobileTab === 'brain'} onClick={() => setMobileTab('brain')} icon={<Brain className="w-4 h-4" />} label="AI Brain" />
               <MobileTabButton active={mobileTab === 'board'} onClick={() => setMobileTab('board')} icon={<Columns3 className="w-4 h-4" />} label="Board" />
