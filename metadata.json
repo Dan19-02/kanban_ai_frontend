@@ -1,0 +1,6 @@
+{
+  "name": "Meeting to Kanban AI",
+  "description": "Analyzes meeting transcripts and generates summarized kanban boards categorized by assignee.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
