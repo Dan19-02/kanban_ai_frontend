@@ -1,6 +1,6 @@
 import {
   ListTodo, CheckCircle2, Flame, Users, ShieldCheck, AlertTriangle, Workflow,
-  type LucideIcon,
+  OctagonAlert, CircleHelp, type LucideIcon,
 } from 'lucide-react';
 import type { Board } from '../types';
 
@@ -20,10 +20,12 @@ export function BoardSummaryBar({ board }: { board: Board }) {
     { icon: ListTodo, label: 'Tasks', value: items.length, color: 'text-slate-500 dark:text-slate-400' },
     { icon: CheckCircle2, label: 'Done', value: items.filter((i) => i.status === 'completed').length, color: 'text-emerald-500' },
     { icon: Flame, label: 'High', value: items.filter((i) => i.priority === 'High').length, color: 'text-red-500' },
+    { icon: OctagonAlert, label: 'Blockers', value: board.blockers?.length ?? 0, color: 'text-red-600' },
     { icon: Users, label: 'People', value: new Set(items.map((i) => i.assignee)).size, color: 'text-indigo-500' },
     { icon: ShieldCheck, label: 'Decisions', value: board.keyDecisions?.length ?? 0, color: 'text-sky-500' },
     { icon: AlertTriangle, label: 'Risks', value: board.risks?.length ?? 0, color: 'text-amber-500' },
     { icon: Workflow, label: 'Dependencies', value: board.dependencies?.length ?? 0, color: 'text-violet-500' },
+    { icon: CircleHelp, label: 'Questions', value: board.openQuestions?.length ?? 0, color: 'text-fuchsia-500' },
   ];
 
   return (

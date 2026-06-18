@@ -30,6 +30,10 @@ export interface MeetingAnalysis {
   risks: string[];
   /** Blocking dependencies / required sequencing between work items. */
   dependencies: string[];
+  /** Impediments currently stopping progress. */
+  blockers: string[];
+  /** Questions raised but left unanswered. */
+  openQuestions: string[];
   sentimentInfo: SentimentInfo | null;
   actionItems: ActionItem[];
   comments?: Comment[];

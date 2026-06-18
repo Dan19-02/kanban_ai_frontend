@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Loader2, Sparkles, Send, BrainCircuit, HeartPulse, ShieldCheck, Brain, AlertTriangle, Workflow } from 'lucide-react';
+import { Loader2, Sparkles, Send, BrainCircuit, HeartPulse, ShieldCheck, Brain, AlertTriangle, Workflow, OctagonAlert, CircleHelp } from 'lucide-react';
 import { MeetingAnalysis } from '../types';
 
 interface TranscriptInputProps {
@@ -85,6 +85,19 @@ export function TranscriptInput({ onAnalyze, isAnalyzing, analysis, canEdit }: T
               </div>
             )}
 
+            {analysis.blockers && analysis.blockers.length > 0 && (
+              <div className="pt-3 border-t border-indigo-200/60 dark:border-indigo-800/30">
+                <h3 className="text-xs font-bold text-red-700 dark:text-red-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <OctagonAlert className="w-3.5 h-3.5" /> Blockers
+                </h3>
+                <ul className="list-disc pl-4 space-y-1.5 text-sm text-slate-700 dark:text-slate-300">
+                  {analysis.blockers.map((b, i) => (
+                    <li key={i}>{b}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {analysis.dependencies && analysis.dependencies.length > 0 && (
               <div className="pt-3 border-t border-indigo-200/60 dark:border-indigo-800/30">
                 <h3 className="text-xs font-bold text-sky-700 dark:text-sky-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -93,6 +106,19 @@ export function TranscriptInput({ onAnalyze, isAnalyzing, analysis, canEdit }: T
                 <ul className="list-disc pl-4 space-y-1.5 text-sm text-slate-700 dark:text-slate-300">
                   {analysis.dependencies.map((dep, i) => (
                     <li key={i}>{dep}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {analysis.openQuestions && analysis.openQuestions.length > 0 && (
+              <div className="pt-3 border-t border-indigo-200/60 dark:border-indigo-800/30">
+                <h3 className="text-xs font-bold text-fuchsia-700 dark:text-fuchsia-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <CircleHelp className="w-3.5 h-3.5" /> Open Questions
+                </h3>
+                <ul className="list-disc pl-4 space-y-1.5 text-sm text-slate-700 dark:text-slate-300">
+                  {analysis.openQuestions.map((q, i) => (
+                    <li key={i}>{q}</li>
                   ))}
                 </ul>
               </div>

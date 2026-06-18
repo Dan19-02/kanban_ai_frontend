@@ -164,7 +164,9 @@ function BoardView({ boardId }: { boardId: string }) {
     }
     for (const d of board.keyDecisions ?? []) rows.push([csvCell('Decision'), csvCell(d), '', ''].join(','));
     for (const r of board.risks ?? []) rows.push([csvCell('Risk'), csvCell(r), '', ''].join(','));
+    for (const b of board.blockers ?? []) rows.push([csvCell('Blocker'), csvCell(b), '', ''].join(','));
     for (const dep of board.dependencies ?? []) rows.push([csvCell('Dependency'), csvCell(dep), '', ''].join(','));
+    for (const q of board.openQuestions ?? []) rows.push([csvCell('Open Question'), csvCell(q), '', ''].join(','));
     const name = (board.name || 'meeting').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
     saveCsv(`${name}-report.csv`, rows);
   };
