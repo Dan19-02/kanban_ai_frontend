@@ -24,6 +24,10 @@ export interface Comment {
 export interface MeetingAnalysis {
   summary: string;
   keyDecisions: string[];
+  /** Risks, concerns, and blockers raised in the meeting. */
+  risks: string[];
+  /** Blocking dependencies / required sequencing between work items. */
+  dependencies: string[];
   sentimentInfo: SentimentInfo | null;
   actionItems: ActionItem[];
   comments?: Comment[];

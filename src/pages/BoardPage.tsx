@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   DownloadCloud, AlertCircle, Loader2, Share2, Plus, ArrowLeft, Eye, Sparkles,
-  Brain, Columns3, MessageSquare,
+  Brain, Columns3, MessageSquare, FileText,
 } from 'lucide-react';
 import { Header } from '../components/Header';
 import { TranscriptInput } from '../components/TranscriptInput';
@@ -17,6 +17,25 @@ import { api, ApiError } from '../api/client';
 import type { ActionItem, ShareInfo } from '../types';
 
 type MobileTab = 'brain' | 'board' | 'comments';
+
+// CSV/formula-injection-safe cell: neutralize a leading = + - @ / tab / CR, then
+// quote-escape per RFC 4180. Used for all CSV exports.
+const csvCell = (value: string): string => {
+  const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${guarded.replace(/"/g, '""')}"`;
+};
+
+const saveCsv = (filename: string, rows: string[]) => {
+  const blob = new Blob([rows.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
 
 export function BoardPage() {
   const { id } = useParams<{ id: string }>();
@@ -124,33 +143,29 @@ function BoardView({ boardId }: { boardId: string }) {
   const handleAddTask = () =>
     wrap(addItem({ title: 'New task', assignee: 'Unassigned', priority: 'Medium' }));
 
+  // Task-only exports formatted for direct import into Trello / Jira.
   const downloadCSV = (platform: 'trello' | 'jira') => {
     const items = board?.actionItems ?? [];
     if (items.length === 0) return;
-
-    // Guard against CSV/formula injection: spreadsheet apps execute a cell
-    // whose value begins with = + - @ or a tab/CR. Item titles and assignees
-    // come from AI output and free-text user input, so neutralize them by
-    // prefixing a single quote, then quote-escape per RFC 4180.
-    const cell = (value: string): string => {
-      const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-      return `"${guarded.replace(/"/g, '""')}"`;
-    };
-
-    const rows: string[] =
+    const rows =
       platform === 'jira'
-        ? ['Summary,Assignee,Issue Type', ...items.map((i) => `${cell(i.title)},${cell(i.assignee)},Task`)]
-        : ['Title,List (Assignee)', ...items.map((i) => `${cell(i.title)},${cell(i.assignee)}`)];
+        ? ['Summary,Assignee,Issue Type', ...items.map((i) => `${csvCell(i.title)},${csvCell(i.assignee)},Task`)]
+        : ['Title,List (Assignee)', ...items.map((i) => `${csvCell(i.title)},${csvCell(i.assignee)}`)];
+    saveCsv(`${platform}-export.csv`, rows);
+  };
 
-    const blob = new Blob([rows.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${platform}-export.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  // Full meeting-intelligence report: tasks, decisions, risks, and dependencies.
+  const downloadReport = () => {
+    if (!board) return;
+    const rows = ['Type,Detail,Assignee,Priority'];
+    for (const i of board.actionItems) {
+      rows.push([csvCell('Task'), csvCell(i.title), csvCell(i.assignee), csvCell(i.priority ?? '')].join(','));
+    }
+    for (const d of board.keyDecisions ?? []) rows.push([csvCell('Decision'), csvCell(d), '', ''].join(','));
+    for (const r of board.risks ?? []) rows.push([csvCell('Risk'), csvCell(r), '', ''].join(','));
+    for (const dep of board.dependencies ?? []) rows.push([csvCell('Dependency'), csvCell(dep), '', ''].join(','));
+    const name = (board.name || 'meeting').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    saveCsv(`${name}-report.csv`, rows);
   };
 
   if (loading) {
@@ -176,6 +191,12 @@ function BoardView({ boardId }: { boardId: string }) {
   }
 
   const hasItems = board.actionItems.length > 0;
+  const hasReport = !!(
+    board.actionItems.length ||
+    board.keyDecisions?.length ||
+    board.risks?.length ||
+    board.dependencies?.length
+  );
   const commentCount = board.comments?.length ?? 0;
 
   // --- Panels (rendered once; placed into the desktop grid or mobile tabs) ---
@@ -282,6 +303,15 @@ function BoardView({ boardId }: { boardId: string }) {
                 <span className="hidden sm:inline">Share</span>
               </button>
             )}
+            <button
+              onClick={downloadReport}
+              disabled={!hasReport}
+              title="Export full report: tasks, decisions, risks & dependencies (CSV)"
+              className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <FileText className="w-4 h-4" />
+              <span className="hidden sm:inline">Report</span>
+            </button>
             <button
               onClick={() => downloadCSV('trello')}
               disabled={!hasItems}

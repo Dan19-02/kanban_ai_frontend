@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Loader2, Sparkles, Send, BrainCircuit, HeartPulse, ShieldCheck, Brain } from 'lucide-react';
+import { Loader2, Sparkles, Send, BrainCircuit, HeartPulse, ShieldCheck, Brain, AlertTriangle, Workflow } from 'lucide-react';
 import { MeetingAnalysis } from '../types';
 
 interface TranscriptInputProps {
@@ -67,6 +67,32 @@ export function TranscriptInput({ onAnalyze, isAnalyzing, analysis, canEdit }: T
                 <ul className="list-disc pl-4 space-y-1.5 text-sm text-slate-700 dark:text-slate-300">
                   {analysis.keyDecisions.map((decision, i) => (
                     <li key={i}>{decision}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {analysis.risks && analysis.risks.length > 0 && (
+              <div className="pt-3 border-t border-indigo-200/60 dark:border-indigo-800/30">
+                <h3 className="text-xs font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" /> Risks
+                </h3>
+                <ul className="list-disc pl-4 space-y-1.5 text-sm text-slate-700 dark:text-slate-300">
+                  {analysis.risks.map((risk, i) => (
+                    <li key={i}>{risk}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {analysis.dependencies && analysis.dependencies.length > 0 && (
+              <div className="pt-3 border-t border-indigo-200/60 dark:border-indigo-800/30">
+                <h3 className="text-xs font-bold text-sky-700 dark:text-sky-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Workflow className="w-3.5 h-3.5" /> Dependencies
+                </h3>
+                <ul className="list-disc pl-4 space-y-1.5 text-sm text-slate-700 dark:text-slate-300">
+                  {analysis.dependencies.map((dep, i) => (
+                    <li key={i}>{dep}</li>
                   ))}
                 </ul>
               </div>
