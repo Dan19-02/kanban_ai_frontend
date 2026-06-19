@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   DownloadCloud, AlertCircle, Loader2, Share2, Plus, ArrowLeft, Eye, Sparkles,
-  Brain, Columns3, MessageSquare, FileText, ChevronLeft,
+  Brain, Columns3, FileText,
 } from 'lucide-react';
 import { Header } from '../components/Header';
 import { TranscriptInput, type SectionFocus } from '../components/TranscriptInput';
@@ -11,13 +11,14 @@ import { CommentsSection } from '../components/CommentsSection';
 import { ShareModal } from '../components/ShareModal';
 import { SetNameModal } from '../components/SetNameModal';
 import { BoardSummaryBar, type SummaryKey } from '../components/BoardSummaryBar';
+import { ChatWidget } from '../components/ChatWidget';
 import { useBoard } from '../hooks/useBoard';
 import { useAuth } from '../auth/AuthContext';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { api, ApiError } from '../api/client';
 import type { ActionItem, ShareInfo } from '../types';
 
-type MobileTab = 'brain' | 'board' | 'comments';
+type MobileTab = 'brain' | 'board';
 
 // Summary-bar chips that filter the Kanban board (the rest jump to an AI-Brain section).
 const BOARD_FILTERS: Partial<Record<SummaryKey, 'all' | 'completed' | 'high'>> = {
@@ -146,12 +147,12 @@ function BoardView({ boardId }: { boardId: string }) {
   const activeChip: SummaryKey | null =
     boardFilter === 'completed' ? 'done' : boardFilter === 'high' ? 'high' : null;
 
-  // --- Team Comments: collapse (desktop) + unread badge ---
-  const [commentsCollapsed, setCommentsCollapsed] = useState(false);
+  // --- Team Comments: floating chat widget + unread badge ---
+  const [chatOpen, setChatOpen] = useState(false);
   const [seenComments, setSeenComments] = useState<number | null>(null);
   const commentsInited = useRef(false);
 
-  const commentsVisible = isDesktop ? !commentsCollapsed : mobileTab === 'comments';
+  const commentsVisible = chatOpen;
   const commentCount = board?.comments?.length ?? 0;
 
   // Comments present on first load count as already seen.
@@ -318,16 +319,6 @@ function BoardView({ boardId }: { boardId: string }) {
     </div>
   );
 
-  const commentsPanel = (
-    <div className="h-full min-h-0 flex flex-col">
-      <CommentsSection
-        comments={board.comments ?? []}
-        canEdit={canEdit}
-        onAddComment={(text) => wrap(addComment(text))}
-      />
-    </div>
-  );
-
   return (
     <div className="h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans overflow-hidden transition-colors">
       <Header
@@ -393,34 +384,18 @@ function BoardView({ boardId }: { boardId: string }) {
         {isDesktop ? (
           <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
             <div className="col-span-3 min-h-0">{transcriptPanel}</div>
-            <div className={`${commentsCollapsed ? 'col-span-8' : 'col-span-6'} min-h-0`}>{boardPanel}</div>
-            {commentsCollapsed ? (
-              <div className="col-span-1 min-h-0">
-                <CollapsedCommentsRail unread={unreadComments} onExpand={() => setCommentsCollapsed(false)} />
-              </div>
-            ) : (
-              <div className="col-span-3 min-h-0 flex flex-col">
-                <CommentsSection
-                  comments={board.comments ?? []}
-                  canEdit={canEdit}
-                  onAddComment={(text) => wrap(addComment(text))}
-                  onCollapse={() => setCommentsCollapsed(true)}
-                />
-              </div>
-            )}
+            <div className="col-span-9 min-h-0">{boardPanel}</div>
           </div>
         ) : (
           <div className="flex flex-col flex-1 min-h-0">
-            <div className="shrink-0 grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
+            <div className="shrink-0 grid grid-cols-2 gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
               <MobileTabButton active={mobileTab === 'brain'} onClick={() => setMobileTab('brain')} icon={<Brain className="w-4 h-4" />} label="AI Brain" />
               <MobileTabButton active={mobileTab === 'board'} onClick={() => setMobileTab('board')} icon={<Columns3 className="w-4 h-4" />} label="Board" />
-              <MobileTabButton active={mobileTab === 'comments'} onClick={() => setMobileTab('comments')} icon={<MessageSquare className="w-4 h-4" />} label="Comments" badge={unreadComments} />
             </div>
             <div className="flex-1 min-h-0 mt-4">
               {/* All panels stay mounted (state preserved); only the active one shows. */}
               <div className={mobileTab === 'brain' ? 'h-full' : 'hidden'}>{transcriptPanel}</div>
               <div className={mobileTab === 'board' ? 'h-full' : 'hidden'}>{boardPanel}</div>
-              <div className={mobileTab === 'comments' ? 'h-full' : 'hidden'}>{commentsPanel}</div>
             </div>
           </div>
         )}
@@ -442,6 +417,15 @@ function BoardView({ boardId }: { boardId: string }) {
           onSubmit={setDisplayName}
         />
       )}
+
+      <ChatWidget
+        comments={board.comments ?? []}
+        canEdit={canEdit}
+        onAddComment={(text) => wrap(addComment(text))}
+        unread={unreadComments}
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+      />
     </div>
   );
 }
@@ -471,31 +455,6 @@ function MobileTabButton({
           {badge}
         </span>
       ) : null}
-    </button>
-  );
-}
-
-function CollapsedCommentsRail({ unread, onExpand }: { unread: number; onExpand: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onExpand}
-      title="Expand team comments"
-      aria-label={unread > 0 ? `Expand team comments, ${unread} unread` : 'Expand team comments'}
-      className="h-full w-full flex flex-col items-center gap-3 py-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-    >
-      <ChevronLeft className="w-4 h-4 text-slate-400" />
-      <div className="relative">
-        <MessageSquare className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-        {unread > 0 && (
-          <span className="absolute -top-2 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
-            {unread > 9 ? '9+' : unread}
-          </span>
-        )}
-      </div>
-      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 [writing-mode:vertical-rl] rotate-180">
-        Team Comments
-      </span>
     </button>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, MessageSquare, ChevronRight } from 'lucide-react';
+import { Send, MessageSquare, ChevronDown } from 'lucide-react';
 import { Comment } from '../types';
 
 interface CommentsSectionProps {
@@ -61,11 +61,11 @@ export function CommentsSection({ comments, canEdit, onAddComment, onCollapse }:
           {onCollapse && (
             <button
               onClick={onCollapse}
-              title="Collapse comments"
-              aria-label="Collapse comments"
+              title="Minimize comments"
+              aria-label="Minimize comments"
               className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-md transition-colors"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronDown className="w-4 h-4" />
             </button>
           )}
         </div>
