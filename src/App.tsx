@@ -1,5 +1,5 @@
 import React, { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from './auth/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -23,8 +23,19 @@ function FullScreenLoader() {
 /** Routes available only to logged-out users; authed users skip to the app. */
 function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) return <FullScreenLoader />;
-  return user ? <Navigate to="/" replace /> : <>{children}</>;
+  // Send an already-authenticated user to where they were headed (e.g. a shared
+  // board link captured as `from` on the way through auth) — not always home.
+  // This MUST match the post-login/register redirect: when register() sets the
+  // user, this redirect and the page's navigate(from) both fire, and under
+  // React 19's batched updates either may win. If they disagree (this one going
+  // to "/"), the share token in `from` is lost and the board never loads.
+  if (user) {
+    const from = (location.state as { from?: string } | null)?.from;
+    return <Navigate to={from ?? '/'} replace />;
+  }
+  return <>{children}</>;
 }
 
 export default function App() {
