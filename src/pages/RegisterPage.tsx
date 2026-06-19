@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Loader2, UserPlus, AlertCircle } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { AuthShell, AuthField } from '../components/AuthShell';
@@ -8,6 +8,10 @@ import { ApiError } from '../api/client';
 export function RegisterPage() {
   const { register } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Where to go after signing up. Set when a share link bounced an unauthenticated
+  // visitor through auth (e.g. "/board/:id?token=…"); defaults to the dashboard.
+  const redirectTo = (location.state as { from?: string } | null)?.from ?? '/';
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,7 +28,7 @@ export function RegisterPage() {
     setSubmitting(true);
     try {
       await register(name.trim(), email.trim(), password);
-      navigate('/', { replace: true });
+      navigate(redirectTo, { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to create account. Please try again.');
     } finally {
@@ -39,7 +43,7 @@ export function RegisterPage() {
       footer={
         <>
           Already have an account?{' '}
-          <Link to="/login" className="font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
+          <Link to="/login" state={location.state} className="font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
             Sign in
           </Link>
         </>

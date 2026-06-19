@@ -37,7 +37,7 @@ export function LoginPage() {
       footer={
         <>
           Don&apos;t have an account?{' '}
-          <Link to="/register" className="font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
+          <Link to="/register" state={location.state} className="font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
             Create one
           </Link>
         </>

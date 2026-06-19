@@ -340,9 +340,28 @@ export function KanbanBoard({ items, canEdit, filter = 'all', onItemMove, onItem
                   <div className="w-8 h-8 rounded-full flex items-center justify-center border bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shrink-0">
                     <span className="font-bold text-xs">{getInitials(selectedItem.assignee)}</span>
                   </div>
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Assigned to</p>
-                    <p className="text-sm font-bold text-slate-900 dark:text-slate-100 leading-none mt-0.5">{selectedItem.assignee}</p>
+                    {canEdit ? (
+                      <input
+                        key={selectedItem.id}
+                        defaultValue={selectedItem.assignee}
+                        onBlur={(e) => {
+                          // Assignee can't be empty — the column grouping and the
+                          // backend both require a name; fall back to "Unassigned".
+                          const next = e.target.value.trim() || 'Unassigned';
+                          if (next !== selectedItem.assignee) onItemUpdate(selectedItem.id, { assignee: next });
+                          else e.target.value = selectedItem.assignee;
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        }}
+                        placeholder="Unassigned"
+                        className="w-full text-sm font-bold text-slate-900 dark:text-slate-100 leading-none mt-0.5 bg-transparent border border-transparent hover:border-slate-200 dark:hover:border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-md px-1.5 -mx-1.5 py-1 outline-none transition-colors"
+                      />
+                    ) : (
+                      <p className="text-sm font-bold text-slate-900 dark:text-slate-100 leading-none mt-0.5">{selectedItem.assignee}</p>
+                    )}
                   </div>
                 </div>
 
@@ -365,9 +384,23 @@ export function KanbanBoard({ items, canEdit, filter = 'all', onItemMove, onItem
 
               <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl p-4">
                 <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Description / Context</h3>
-                <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-wrap">
-                  {selectedItem.description || "No detailed description was extracted from the transcript."}
-                </p>
+                {canEdit ? (
+                  <textarea
+                    key={selectedItem.id}
+                    defaultValue={selectedItem.description ?? ''}
+                    onBlur={(e) => {
+                      const v = e.target.value;
+                      if (v !== (selectedItem.description ?? '')) onItemUpdate(selectedItem.id, { description: v });
+                    }}
+                    rows={4}
+                    placeholder="Add a description or context for this task…"
+                    className="w-full text-sm text-slate-600 dark:text-slate-300 leading-relaxed bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors resize-y min-h-[88px]"
+                  />
+                ) : (
+                  <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-wrap">
+                    {selectedItem.description || "No detailed description was extracted from the transcript."}
+                  </p>
+                )}
               </div>
 
               {selectedItem.blockedBy && selectedItem.blockedBy.length > 0 && (
