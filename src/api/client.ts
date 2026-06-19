@@ -26,11 +26,48 @@ export class ApiError extends Error {
 // In production set VITE_API_URL to the deployed backend's origin.
 export const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
+// --- Auth token (Bearer) -----------------------------------------------------
+// We authenticate with an `Authorization: Bearer` header so the app works
+// cross-origin on EVERY device — mobile browsers block third-party cookies,
+// which is what the cookie-only flow relied on. The httpOnly cookie still
+// works for same-origin deployments.
+const TOKEN_KEY = 'kanban_auth_token';
+
+function readStoredToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null; // storage blocked (private mode, etc.)
+  }
+}
+
+let authToken: string | null = readStoredToken();
+
+export function getAuthToken(): string | null {
+  return authToken;
+}
+
+export function setAuthToken(token: string | null): void {
+  authToken = token;
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Storage unavailable — the in-memory token still works this session.
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> | undefined),
+  };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+
   const res = await fetch(`${API_BASE}/api${path}`, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
     ...options,
+    headers,
   });
 
   const data = await res.json().catch(() => null);
@@ -44,11 +81,29 @@ const body = (data: unknown) => JSON.stringify(data);
 
 export const api = {
   auth: {
-    register: (input: { name: string; email: string; password: string }) =>
-      request<{ user: User }>('/auth/register', { method: 'POST', body: body(input) }),
-    login: (input: { email: string; password: string }) =>
-      request<{ user: User }>('/auth/login', { method: 'POST', body: body(input) }),
-    logout: () => request<{ ok: true }>('/auth/logout', { method: 'POST' }),
+    register: async (input: { name: string; email: string; password: string }) => {
+      const data = await request<{ user: User; token: string }>('/auth/register', {
+        method: 'POST',
+        body: body(input),
+      });
+      setAuthToken(data.token);
+      return data;
+    },
+    login: async (input: { email: string; password: string }) => {
+      const data = await request<{ user: User; token: string }>('/auth/login', {
+        method: 'POST',
+        body: body(input),
+      });
+      setAuthToken(data.token);
+      return data;
+    },
+    logout: async () => {
+      try {
+        return await request<{ ok: true }>('/auth/logout', { method: 'POST' });
+      } finally {
+        setAuthToken(null); // always drop the local token, even if the call fails
+      }
+    },
     me: () => request<{ user: User }>('/auth/me'),
   },
 
