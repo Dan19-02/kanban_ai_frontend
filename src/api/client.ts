@@ -6,7 +6,6 @@ import type {
   Plan,
   PlanCatalogItem,
   Role,
-  ShareInfo,
   SubscriptionInfo,
   User,
   ViewerInfo,
@@ -127,17 +126,6 @@ export const api = {
         method: 'POST',
         body: body({ transcript }),
       }),
-
-    join: (token: string) =>
-      request<{ boardId: string }>('/boards/join', { method: 'POST', body: body({ token }) }),
-
-    share: (id: string, role: 'EDITOR' | 'VIEWER') =>
-      request<{ share: ShareInfo }>(`/boards/${id}/share`, {
-        method: 'POST',
-        body: body({ role }),
-      }),
-    unshare: (id: string) =>
-      request<{ share: ShareInfo }>(`/boards/${id}/share`, { method: 'DELETE' }),
 
     members: (id: string) => request<{ members: Member[] }>(`/boards/${id}/members`),
     addMember: (id: string, email: string, role: Exclude<Role, 'OWNER'> = 'EDITOR') =>

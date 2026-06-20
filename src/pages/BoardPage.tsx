@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import {
   DownloadCloud, AlertCircle, Loader2, Share2, Plus, ArrowLeft, Eye, Sparkles,
   Brain, Columns3, FileText,
@@ -15,8 +15,8 @@ import { ChatWidget } from '../components/ChatWidget';
 import { useBoard } from '../hooks/useBoard';
 import { useAuth } from '../auth/AuthContext';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { api, ApiError } from '../api/client';
-import type { ActionItem, ShareInfo } from '../types';
+import { ApiError } from '../api/client';
+import type { ActionItem } from '../types';
 
 type MobileTab = 'brain' | 'board';
 
@@ -49,59 +49,7 @@ const saveCsv = (filename: string, rows: string[]) => {
 
 export function BoardPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const initialToken = useRef(searchParams.get('token'));
-  const [phase, setPhase] = useState<'join' | 'ready' | 'error'>(
-    initialToken.current ? 'join' : 'ready',
-  );
-  const [joinError, setJoinError] = useState<string | null>(null);
-
-  // If we arrived via a share link, redeem the token before loading the board.
-  useEffect(() => {
-    const token = initialToken.current;
-    if (!token || !id) return;
-    let cancelled = false;
-    api.boards
-      .join(token)
-      .then(() => {
-        if (cancelled) return;
-        navigate(`/board/${id}`, { replace: true }); // strip token from URL
-        setPhase('ready');
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setJoinError(err instanceof ApiError ? err.message : 'Failed to join board');
-        setPhase('error');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, navigate]);
-
   if (!id) return null;
-
-  if (phase === 'join') {
-    return (
-      <CenteredMessage>
-        <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-3">Joining board…</p>
-      </CenteredMessage>
-    );
-  }
-
-  if (phase === 'error') {
-    return (
-      <CenteredMessage>
-        <AlertCircle className="w-8 h-8 text-red-500" />
-        <p className="text-sm font-medium text-slate-900 dark:text-slate-100 mt-3">{joinError}</p>
-        <Link to="/" className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:underline mt-2">
-          Back to your boards
-        </Link>
-      </CenteredMessage>
-    );
-  }
-
   return <BoardView boardId={id} />;
 }
 
@@ -117,7 +65,7 @@ function BoardView({ boardId }: { boardId: string }) {
   const {
     board, loading, error, isConnected, presence, canEdit,
     needsDisplayName, setDisplayName,
-    patchBoard, analyze, moveItem, updateItem, deleteItem, addItem, addComment,
+    analyze, moveItem, updateItem, deleteItem, addItem, addComment,
   } = useBoard(boardId);
 
   const { user, refreshUser } = useAuth();
@@ -404,8 +352,6 @@ function BoardView({ boardId }: { boardId: string }) {
       {showShare && board.role === 'OWNER' && (
         <ShareModal
           boardId={board.id}
-          share={board.share}
-          onShareChange={(share: ShareInfo) => patchBoard({ share })}
           onClose={() => setShowShare(false)}
         />
       )}

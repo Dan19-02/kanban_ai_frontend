@@ -9,8 +9,8 @@ export function RegisterPage() {
   const { register } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  // Where to go after signing up. Set when a share link bounced an unauthenticated
-  // visitor through auth (e.g. "/board/:id?token=…"); defaults to the dashboard.
+  // Where to go after signing up. Set by ProtectedRoute when an unauthenticated
+  // visitor is bounced here from a protected page; defaults to the dashboard.
   const redirectTo = (location.state as { from?: string } | null)?.from ?? '/';
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
