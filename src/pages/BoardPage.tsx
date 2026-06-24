@@ -378,7 +378,6 @@ function BoardView({ boardId }: { boardId: string }) {
         <ShareModal
           kind="board"
           id={board.id}
-          initialShare={board.share}
           onClose={() => setShowShare(false)}
         />
       )}

@@ -12,7 +12,6 @@ import type {
   ProjectSummary,
   RollupTask,
   Role,
-  ShareInfo,
   SubscriptionInfo,
   User,
   ViewerInfo,
@@ -148,12 +147,6 @@ export const api = {
       request<{ ok: true }>(`/projects/${id}/members`, { method: 'POST', body: body({ email, role }) }),
     removeMember: (id: string, userId: string) =>
       request<{ ok: true }>(`/projects/${id}/members/${userId}`, { method: 'DELETE' }),
-    share: (id: string, role: Exclude<Role, 'OWNER'> = 'EDITOR') =>
-      request<{ share: ShareInfo }>(`/projects/${id}/share`, { method: 'POST', body: body({ role }) }),
-    unshare: (id: string) =>
-      request<{ share: ShareInfo }>(`/projects/${id}/share`, { method: 'DELETE' }),
-    join: (token: string) =>
-      request<{ projectId: string }>('/projects/join', { method: 'POST', body: body({ token }) }),
   },
 
   boards: {
@@ -186,10 +179,6 @@ export const api = {
       request<{ ok: true }>(`/boards/${id}/members`, { method: 'POST', body: body({ email, role }) }),
     removeMember: (id: string, userId: string) =>
       request<{ ok: true }>(`/boards/${id}/members/${userId}`, { method: 'DELETE' }),
-    share: (id: string, role: Exclude<Role, 'OWNER'> = 'EDITOR') =>
-      request<{ share: ShareInfo }>(`/boards/${id}/share`, { method: 'POST', body: body({ role }) }),
-    unshare: (id: string) =>
-      request<{ share: ShareInfo }>(`/boards/${id}/share`, { method: 'DELETE' }),
 
     // Task-level comments (the "Activity" tab on an action item).
     itemComments: (id: string, itemId: string) =>

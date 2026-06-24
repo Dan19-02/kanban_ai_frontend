@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Plus, Loader2, KanbanSquare, Trash2, Users, ListChecks, Sparkles, X, AlertCircle,
   ArrowLeft, Settings, LayoutGrid, ClipboardList, CheckCircle2, Circle, Calendar, User,
@@ -29,7 +29,6 @@ export function ProjectPage() {
 
 function ProjectView({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [boards, setBoards] = useState<BoardSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -61,27 +60,7 @@ function ProjectView({ projectId }: { projectId: string }) {
       });
   };
 
-  // If arriving via an invite link (?token=…), join first, then load.
-  useEffect(() => {
-    const token = searchParams.get('token');
-    let cancelled = false;
-    (async () => {
-      if (token) {
-        try {
-          await api.projects.join(token);
-        } catch {
-          /* invalid/expired link — fall through and let the load 404 if needed */
-        }
-        if (cancelled) return;
-        setSearchParams({}, { replace: true });
-      }
-      if (!cancelled) loadProject();
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  useEffect(loadProject, [projectId]);
 
   const handleCreateBoard = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -271,7 +250,6 @@ function ProjectView({ projectId }: { projectId: string }) {
         <ShareModal
           kind="project"
           id={project.id}
-          initialShare={project.share}
           onClose={() => setShowShare(false)}
         />
       )}

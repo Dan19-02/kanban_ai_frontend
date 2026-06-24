@@ -99,7 +99,6 @@ export interface Project {
   archived: boolean;
   /** The current viewer's role on this project. */
   role: Role;
-  share: ShareInfo;
   createdAt: string;
   updatedAt: string;
 }
@@ -123,14 +122,6 @@ export interface RollupTask {
   blockedBy: string[];
 }
 
-export interface ShareInfo {
-  enabled: boolean;
-  role: 'EDITOR' | 'VIEWER' | null;
-  /** Only present for the board owner. */
-  token: string | null;
-  url?: string;
-}
-
 /** A board's metadata plus its current collaborative state. */
 export interface Board extends MeetingAnalysis {
   id: string;
@@ -139,7 +130,6 @@ export interface Board extends MeetingAnalysis {
   /** Owning project, or null for a standalone/unfiled board. */
   projectId: string | null;
   role: Role;
-  share: ShareInfo;
   createdAt: string;
   updatedAt: string;
 }
