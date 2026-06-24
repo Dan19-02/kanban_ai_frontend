@@ -9,6 +9,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 const LoginPage = lazy(() => import('./pages/LoginPage').then((m) => ({ default: m.LoginPage })));
 const RegisterPage = lazy(() => import('./pages/RegisterPage').then((m) => ({ default: m.RegisterPage })));
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
+const ProjectPage = lazy(() => import('./pages/ProjectPage').then((m) => ({ default: m.ProjectPage })));
 const BoardPage = lazy(() => import('./pages/BoardPage').then((m) => ({ default: m.BoardPage })));
 const BillingPage = lazy(() => import('./pages/BillingPage').then((m) => ({ default: m.BillingPage })));
 
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
         <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
         <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+        <Route path="/project/:id" element={<ProtectedRoute><ProjectPage /></ProtectedRoute>} />
         <Route path="/board/:id" element={<ProtectedRoute><BoardPage /></ProtectedRoute>} />
         <Route path="/billing" element={<ProtectedRoute><BillingPage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />

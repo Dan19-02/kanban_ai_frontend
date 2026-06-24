@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   DownloadCloud, AlertCircle, Loader2, Share2, Plus, ArrowLeft, Eye, Sparkles,
@@ -66,7 +66,20 @@ function BoardView({ boardId }: { boardId: string }) {
     board, loading, error, isConnected, presence, canEdit,
     needsDisplayName, setDisplayName,
     analyze, moveItem, updateItem, deleteItem, addItem, addComment,
+    getTaskComments, addTaskComment,
   } = useBoard(boardId);
+
+  // People who can be @mentioned / are involved on this board: task assignees,
+  // anyone who has commented, and whoever is currently present.
+  const people = useMemo(() => {
+    const set = new Set<string>();
+    for (const it of board?.actionItems ?? []) {
+      if (it.assignee && it.assignee !== 'Unassigned') set.add(it.assignee);
+    }
+    for (const c of board?.comments ?? []) set.add(c.author);
+    for (const p of presence) set.add(p.name);
+    return [...set].sort();
+  }, [board, presence]);
 
   const { user, refreshUser } = useAuth();
   const isDesktop = useMediaQuery('(min-width: 1024px)');
@@ -119,13 +132,16 @@ function BoardView({ boardId }: { boardId: string }) {
   const unreadComments =
     commentsVisible || seenComments === null ? 0 : Math.max(0, commentCount - seenComments);
 
-  const handleAnalyze = async (transcript: string) => {
+  // Returns true on success so the transcript box can clear and be ready for the
+  // next meeting; false on failure so the user keeps their text to retry.
+  const handleAnalyze = async (transcript: string): Promise<boolean> => {
     setIsAnalyzing(true);
     setActionError(null);
     setQuotaExceeded(false);
     try {
       await analyze(transcript);
       refreshUser(); // update remaining-transcription count
+      return true;
     } catch (err) {
       if (err instanceof ApiError && err.status === 402) {
         setQuotaExceeded(true);
@@ -133,6 +149,7 @@ function BoardView({ boardId }: { boardId: string }) {
       } else {
         setActionError(err instanceof ApiError ? err.message : 'Failed to analyze transcript');
       }
+      return false;
     } finally {
       setIsAnalyzing(false);
     }
@@ -259,6 +276,9 @@ function BoardView({ boardId }: { boardId: string }) {
           items={board.actionItems}
           canEdit={canEdit}
           filter={boardFilter}
+          people={people}
+          loadTaskComments={getTaskComments}
+          addTaskComment={addTaskComment}
           onItemMove={(itemId, assignee) => wrap(moveItem(itemId, assignee))}
           onItemUpdate={(itemId, updates: Partial<ActionItem>) => wrap(updateItem(itemId, updates))}
           onItemDelete={(itemId) => wrap(deleteItem(itemId))}
@@ -272,7 +292,12 @@ function BoardView({ boardId }: { boardId: string }) {
       <Header
         center={
           <div className="flex items-center gap-2 min-w-0 ml-1 pl-3 border-l border-slate-200 dark:border-slate-800">
-            <Link to="/" aria-label="Back to boards" className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 lg:hidden">
+            <Link
+              to={board.projectId ? `/project/${board.projectId}` : '/'}
+              aria-label={board.projectId ? 'Back to project' : 'Back to dashboard'}
+              title={board.projectId ? 'Back to project' : 'Back to dashboard'}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 shrink-0"
+            >
               <ArrowLeft className="w-4 h-4" />
             </Link>
             <span className="font-semibold text-slate-900 dark:text-slate-100 truncate max-w-[120px] sm:max-w-[200px] lg:max-w-[260px]">
@@ -351,7 +376,9 @@ function BoardView({ boardId }: { boardId: string }) {
 
       {showShare && board.role === 'OWNER' && (
         <ShareModal
-          boardId={board.id}
+          kind="board"
+          id={board.id}
+          initialShare={board.share}
           onClose={() => setShowShare(false)}
         />
       )}
@@ -367,6 +394,7 @@ function BoardView({ boardId }: { boardId: string }) {
       <ChatWidget
         comments={board.comments ?? []}
         canEdit={canEdit}
+        people={people}
         onAddComment={(text) => wrap(addComment(text))}
         unread={unreadComments}
         open={chatOpen}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { api, ApiError, API_BASE, getAuthToken } from '../api/client';
-import type { ActionItem, Board, MeetingAnalysis, PresenceUser, ViewerInfo } from '../types';
+import type { ActionItem, Board, Comment, MeetingAnalysis, PresenceUser, ViewerInfo } from '../types';
 
 interface UseBoardResult {
   board: Board | null;
@@ -20,6 +20,8 @@ interface UseBoardResult {
   deleteItem: (itemId: string) => Promise<void>;
   addItem: (item: Partial<ActionItem>) => Promise<void>;
   addComment: (text: string) => Promise<void>;
+  getTaskComments: (itemId: string) => Promise<Comment[]>;
+  addTaskComment: (itemId: string, text: string) => Promise<Comment[]>;
 }
 
 export function useBoard(boardId: string): UseBoardResult {
@@ -161,6 +163,18 @@ export function useBoard(boardId: string): UseBoardResult {
     [boardId],
   );
 
+  // Task-level comments are fetched on demand (when a task is opened) rather than
+  // kept in board state, since most are never viewed.
+  const getTaskComments = useCallback(
+    (itemId: string) => api.boards.itemComments(boardId, itemId).then((r) => r.comments),
+    [boardId],
+  );
+  const addTaskComment = useCallback(
+    (itemId: string, text: string) =>
+      api.boards.addItemComment(boardId, itemId, text).then((r) => r.comments),
+    [boardId],
+  );
+
   return {
     board,
     loading,
@@ -178,5 +192,7 @@ export function useBoard(boardId: string): UseBoardResult {
     deleteItem,
     addItem,
     addComment,
+    getTaskComments,
+    addTaskComment,
   };
 }

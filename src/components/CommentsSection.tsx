@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Send, MessageSquare, ChevronDown } from 'lucide-react';
 import { Comment } from '../types';
+import { MentionInput } from './MentionInput';
+import { renderMentions } from '../lib/mentions';
 
 interface CommentsSectionProps {
   comments: Comment[];
@@ -8,6 +10,8 @@ interface CommentsSectionProps {
   onAddComment: (text: string) => void;
   /** When provided, shows a collapse button in the header (desktop). */
   onCollapse?: () => void;
+  /** Names available for @mention autocomplete + highlighting. */
+  people?: string[];
 }
 
 const AVATAR_COLORS = [
@@ -36,15 +40,18 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
-export function CommentsSection({ comments, canEdit, onAddComment, onCollapse }: CommentsSectionProps) {
+export function CommentsSection({ comments, canEdit, onAddComment, onCollapse, people = [] }: CommentsSectionProps) {
   const [text, setText] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const submit = () => {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || !canEdit) return;
     onAddComment(trimmed);
     setText('');
+  };
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submit();
   };
 
   return (
@@ -94,7 +101,7 @@ export function CommentsSection({ comments, canEdit, onAddComment, onCollapse }:
                       {new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-wrap break-words mt-0.5">{c.text}</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-wrap break-words mt-0.5">{renderMentions(c.text, people)}</p>
                 </div>
               </div>
             ))}
@@ -103,13 +110,14 @@ export function CommentsSection({ comments, canEdit, onAddComment, onCollapse }:
       </div>
 
       <form onSubmit={handleSubmit} className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex items-center gap-2 shrink-0 transition-colors">
-        <input
-          type="text"
+        <MentionInput
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={setText}
+          onSubmit={submit}
+          people={people}
           disabled={!canEdit}
-          placeholder={canEdit ? 'Type a comment...' : 'View-only access'}
-          className="flex-1 px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 disabled:opacity-60 disabled:cursor-not-allowed"
+          placeholder={canEdit ? 'Type a comment… use @ to mention' : 'View-only access'}
+          className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 disabled:opacity-60 disabled:cursor-not-allowed"
         />
         <button
           type="submit"

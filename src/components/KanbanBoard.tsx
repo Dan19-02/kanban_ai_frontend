@@ -1,15 +1,26 @@
-import React, { useState, useMemo } from 'react';
-import { ActionItem } from '../types';
-import { GripVertical, X, Search, Calendar, Trash2, Lock } from 'lucide-react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { ActionItem, Comment } from '../types';
+import {
+  GripVertical, X, Search, Calendar, Trash2, Lock, MessageSquare, Loader2, Send, FileText,
+} from 'lucide-react';
 import { motion } from 'motion/react';
+import { MentionInput } from './MentionInput';
+import { renderMentions } from '../lib/mentions';
 
 type GroupBy = 'assignee' | 'priority' | 'dueDate';
+type ModalTab = 'details' | 'activity';
 
 interface KanbanBoardProps {
   items: ActionItem[];
   canEdit: boolean;
   /** Optional quick filter applied alongside search. Default shows everything. */
   filter?: 'all' | 'completed' | 'high';
+  /** Names for @mention autocomplete in task activity. */
+  people?: string[];
+  /** Fetch a task's comments (enables the Activity tab when provided). */
+  loadTaskComments?: (itemId: string) => Promise<Comment[]>;
+  /** Post a comment to a task; resolves to the updated thread. */
+  addTaskComment?: (itemId: string, text: string) => Promise<Comment[]>;
   onItemMove: (itemId: string, newAssignee: string) => void;
   onItemUpdate: (itemId: string, updates: Partial<ActionItem>) => void;
   onItemDelete: (itemId: string) => void;
@@ -38,13 +49,57 @@ function dueBucket(dueDate?: string): { key: string; label: string } {
 
 const DUE_ORDER = ['overdue', 'today', 'week', 'later', 'none'] as const;
 
-export function KanbanBoard({ items, canEdit, filter = 'all', onItemMove, onItemUpdate, onItemDelete }: KanbanBoardProps) {
+export function KanbanBoard({
+  items, canEdit, filter = 'all', people, loadTaskComments, addTaskComment,
+  onItemMove, onItemUpdate, onItemDelete,
+}: KanbanBoardProps) {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [groupBy, setGroupBy] = useState<GroupBy>('assignee');
 
+  // Task detail modal: tabs + per-task comment thread (the "Activity" tab).
+  const [modalTab, setModalTab] = useState<ModalTab>('details');
+  const [taskComments, setTaskComments] = useState<Comment[] | null>(null);
+  const [commentText, setCommentText] = useState('');
+  const [posting, setPosting] = useState(false);
+
   // The actual selected item derived from the items array
   const selectedItem = items.find((i) => i.id === selectedItemId) || null;
+
+  // Load the thread whenever a task is opened; reset on close.
+  useEffect(() => {
+    setModalTab('details');
+    setTaskComments(null);
+    setCommentText('');
+    if (!selectedItemId || !loadTaskComments) return;
+    let cancelled = false;
+    loadTaskComments(selectedItemId)
+      .then((c) => !cancelled && setTaskComments(c))
+      .catch(() => !cancelled && setTaskComments([]));
+    return () => { cancelled = true; };
+  }, [selectedItemId, loadTaskComments]);
+
+  const postComment = async () => {
+    const t = commentText.trim();
+    if (!t || !selectedItem || !addTaskComment) return;
+    setPosting(true);
+    try {
+      const updated = await addTaskComment(selectedItem.id, t);
+      setTaskComments(updated);
+      setCommentText('');
+    } catch {
+      /* surfaced by the board-level error handler via the thrown ApiError */
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const tabCls = (t: ModalTab) =>
+    `flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+      modalTab === t
+        ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+        : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+    }`;
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
     e.dataTransfer.setData('text/plain', id);
@@ -317,6 +372,74 @@ export function KanbanBoard({ items, canEdit, filter = 'all', onItemMove, onItem
               </button>
             </div>
 
+            {loadTaskComments && (
+              <div className="flex items-center gap-1 px-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
+                <button onClick={() => setModalTab('details')} className={tabCls('details')}>
+                  <FileText className="w-3.5 h-3.5" /> Details
+                </button>
+                <button onClick={() => setModalTab('activity')} className={tabCls('activity')}>
+                  <MessageSquare className="w-3.5 h-3.5" /> Activity
+                  {taskComments && taskComments.length > 0 ? ` (${taskComments.length})` : ''}
+                </button>
+              </div>
+            )}
+
+            {modalTab === 'activity' ? (
+              <div className="p-5 overflow-y-auto flex flex-col gap-4 min-h-[240px]">
+                {taskComments === null ? (
+                  <div className="flex justify-center py-10">
+                    <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+                  </div>
+                ) : taskComments.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 text-slate-400 dark:text-slate-500 gap-2 text-center">
+                    <MessageSquare className="w-8 h-8 opacity-20" />
+                    <p className="text-sm font-medium">No activity yet</p>
+                    <p className="text-xs">Discuss this task with your team.</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {taskComments.map((c) => (
+                      <div key={c.id} className="flex gap-2.5">
+                        <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+                          {c.author.substring(0, 2).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2.5 rounded-lg rounded-tl-sm">
+                          <div className="flex justify-between items-baseline gap-2">
+                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300 truncate">{c.author}</span>
+                            <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0">
+                              {new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-wrap break-words mt-0.5">
+                            {renderMentions(c.text, people ?? [])}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {canEdit && (
+                  <form onSubmit={(e) => { e.preventDefault(); postComment(); }} className="flex items-center gap-2 mt-1">
+                    <MentionInput
+                      value={commentText}
+                      onChange={setCommentText}
+                      onSubmit={postComment}
+                      people={people ?? []}
+                      disabled={posting}
+                      placeholder="Add a comment… use @ to mention"
+                      className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
+                    />
+                    <button
+                      type="submit"
+                      disabled={posting || !commentText.trim()}
+                      className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                    >
+                      {posting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    </button>
+                  </form>
+                )}
+              </div>
+            ) : (
             <div className="p-6 overflow-y-auto">
               {canEdit ? (
                 <input
@@ -416,6 +539,7 @@ export function KanbanBoard({ items, canEdit, filter = 'all', onItemMove, onItem
                 </div>
               )}
             </div>
+            )}
 
             <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex justify-between items-center shrink-0">
               {canEdit ? (

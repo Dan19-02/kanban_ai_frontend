@@ -78,6 +78,51 @@ export interface SubscriptionInfo extends User {
 
 export type Role = 'OWNER' | 'EDITOR' | 'VIEWER';
 
+// --- Projects ---
+
+/** Colour tokens for a project (mapped to Tailwind classes in the UI). */
+export type ProjectColor =
+  | 'indigo'
+  | 'emerald'
+  | 'amber'
+  | 'rose'
+  | 'sky'
+  | 'violet'
+  | 'teal'
+  | 'slate';
+
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
+  color: ProjectColor;
+  archived: boolean;
+  /** The current viewer's role on this project. */
+  role: Role;
+  share: ShareInfo;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A project plus the rollup counts shown on the dashboard. */
+export interface ProjectSummary extends Project {
+  boardCount: number;
+  openTaskCount: number;
+}
+
+/** A flattened action item with its source-board context (rollup view). */
+export interface RollupTask {
+  id: string;
+  boardId: string;
+  boardName: string;
+  title: string;
+  assignee: string;
+  status: 'pending' | 'completed';
+  priority?: 'High' | 'Medium' | 'Low';
+  dueDate?: string;
+  blockedBy: string[];
+}
+
 export interface ShareInfo {
   enabled: boolean;
   role: 'EDITOR' | 'VIEWER' | null;
@@ -91,6 +136,8 @@ export interface Board extends MeetingAnalysis {
   id: string;
   name: string;
   ownerId: string;
+  /** Owning project, or null for a standalone/unfiled board. */
+  projectId: string | null;
   role: Role;
   share: ShareInfo;
   createdAt: string;
@@ -102,6 +149,8 @@ export interface BoardSummary {
   id: string;
   name: string;
   role: Role;
+  /** Owning project, or null for a standalone/unfiled board. */
+  projectId?: string | null;
   hasAnalysis: boolean;
   itemCount: number;
   memberCount: number;
@@ -126,4 +175,16 @@ export interface ViewerInfo {
 export interface PresenceUser {
   id: string;
   name: string;
+}
+
+/** An in-app notification (named to avoid clashing with the DOM `Notification`). */
+export interface AppNotification {
+  id: string;
+  type: 'mention' | 'assignment';
+  boardId: string | null;
+  actionItemId: string | null;
+  actorName: string;
+  text: string;
+  read: boolean;
+  createdAt: string;
 }

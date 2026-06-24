@@ -1,33 +1,91 @@
 import React, { useEffect, useState } from 'react';
-import { X, Check, Loader2, UserMinus, AlertCircle, UserPlus } from 'lucide-react';
+import { X, Check, Loader2, UserMinus, AlertCircle, UserPlus, Link2, Copy } from 'lucide-react';
 import { api, ApiError } from '../api/client';
-import type { Member } from '../types';
+import type { Member, Role, ShareInfo } from '../types';
 
 interface ShareModalProps {
-  boardId: string;
+  /** What is being shared. Both flows reuse the same UI and member model. */
+  kind: 'board' | 'project';
+  id: string;
+  /** Current share-link state (token shown only to owners). */
+  initialShare: ShareInfo;
   onClose: () => void;
 }
 
-export function ShareModal({ boardId, onClose }: ShareModalProps) {
+export function ShareModal({ kind, id, initialShare, onClose }: ShareModalProps) {
   const [members, setMembers] = useState<Member[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'EDITOR' | 'VIEWER'>('EDITOR');
+  const [inviteRole, setInviteRole] = useState<Exclude<Role, 'OWNER'>>('EDITOR');
   const [inviting, setInviting] = useState(false);
   const [inviteNotice, setInviteNotice] = useState<string | null>(null);
+  const [share, setShare] = useState<ShareInfo>(initialShare);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const label = kind === 'project' ? 'project' : 'board';
+
+  // Branch the API by kind; both expose the same member/share surface.
+  const svcMembers = () => (kind === 'project' ? api.projects.members(id) : api.boards.members(id));
+  const svcAdd = (email: string, role: Exclude<Role, 'OWNER'>) =>
+    kind === 'project' ? api.projects.addMember(id, email, role) : api.boards.addMember(id, email, role);
+  const svcRemove = (userId: string) =>
+    kind === 'project' ? api.projects.removeMember(id, userId) : api.boards.removeMember(id, userId);
+  const svcShare = (role: Exclude<Role, 'OWNER'>) =>
+    kind === 'project' ? api.projects.share(id, role) : api.boards.share(id, role);
+  const svcUnshare = () => (kind === 'project' ? api.projects.unshare(id) : api.boards.unshare(id));
 
   const loadMembers = () => {
-    api.boards
-      .members(boardId)
+    svcMembers()
       .then(({ members }) => setMembers(members))
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load members'));
   };
 
-  useEffect(loadMembers, [boardId]);
+  useEffect(loadMembers, [id, kind]);
+
+  const linkRole: Exclude<Role, 'OWNER'> = share.role ?? 'EDITOR';
+  const linkUrl =
+    share.url ?? (share.token ? `${window.location.origin}/${kind}/${id}?token=${share.token}` : '');
+
+  const setLink = async (role: Exclude<Role, 'OWNER'>) => {
+    setLinkBusy(true);
+    setError(null);
+    try {
+      const { share: s } = await svcShare(role);
+      setShare(s);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not update the link');
+    } finally {
+      setLinkBusy(false);
+    }
+  };
+
+  const disableLink = async () => {
+    setLinkBusy(true);
+    setError(null);
+    try {
+      const { share: s } = await svcUnshare();
+      setShare(s);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not disable the link');
+    } finally {
+      setLinkBusy(false);
+    }
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(linkUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setError('Could not copy — select and copy the link manually.');
+    }
+  };
 
   const removeMember = async (userId: string) => {
     try {
-      await api.boards.removeMember(boardId, userId);
+      await svcRemove(userId);
       setMembers((prev) => prev?.filter((m) => m.userId !== userId) ?? null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to remove member');
@@ -42,9 +100,9 @@ export function ShareModal({ boardId, onClose }: ShareModalProps) {
     setError(null);
     setInviteNotice(null);
     try {
-      await api.boards.addMember(boardId, email, inviteRole);
+      await svcAdd(email, inviteRole);
       setInviteEmail('');
-      setInviteNotice(`Added ${email} to the board.`);
+      setInviteNotice(`Added ${email} to the ${label}.`);
       loadMembers();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not add that person');
@@ -57,8 +115,8 @@ export function ShareModal({ boardId, onClose }: ShareModalProps) {
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
       <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-lg border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh]">
         <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
-          <h3 className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-            <UserPlus className="w-4 h-4 text-indigo-600 dark:text-indigo-400" /> Add people
+          <h3 className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2 capitalize">
+            <UserPlus className="w-4 h-4 text-indigo-600 dark:text-indigo-400" /> Share {label}
           </h3>
           <button
             onClick={onClose}
@@ -76,9 +134,68 @@ export function ShareModal({ boardId, onClose }: ShareModalProps) {
             </div>
           )}
 
-          {/* Add a teammate who already has an account, by email. */}
+          {/* Share link */}
           <section>
-            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1">Add a person</p>
+            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1 flex items-center gap-1.5">
+              <Link2 className="w-4 h-4 text-slate-400" /> Invite link
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+              Anyone with an account who opens this link joins the {label}.
+            </p>
+            {share.enabled ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <input
+                    readOnly
+                    value={linkUrl}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="flex-1 min-w-0 px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-300 font-mono"
+                  />
+                  <button
+                    onClick={copy}
+                    className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shrink-0"
+                  >
+                    {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    {copied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                    Joiners can
+                    <select
+                      value={linkRole}
+                      disabled={linkBusy}
+                      onChange={(e) => setLink(e.target.value as Exclude<Role, 'OWNER'>)}
+                      className="text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-slate-900 dark:text-slate-100"
+                    >
+                      <option value="EDITOR">edit</option>
+                      <option value="VIEWER">view</option>
+                    </select>
+                  </label>
+                  <button
+                    onClick={disableLink}
+                    disabled={linkBusy}
+                    className="text-xs font-semibold text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
+                  >
+                    {linkBusy ? 'Working…' : 'Disable link'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setLink('EDITOR')}
+                disabled={linkBusy}
+                className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                {linkBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
+                Create invite link
+              </button>
+            )}
+          </section>
+
+          {/* Add a teammate who already has an account, by email. */}
+          <section className="pt-1 border-t border-slate-100 dark:border-slate-800">
+            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-1 mt-4">Add a person</p>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
               Add someone who already has an account by their email.
             </p>
@@ -93,7 +210,7 @@ export function ShareModal({ boardId, onClose }: ShareModalProps) {
               />
               <select
                 value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as 'EDITOR' | 'VIEWER')}
+                onChange={(e) => setInviteRole(e.target.value as Exclude<Role, 'OWNER'>)}
                 className="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-2 text-slate-900 dark:text-slate-100 shrink-0"
               >
                 <option value="EDITOR">Can edit</option>

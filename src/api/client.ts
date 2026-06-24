@@ -1,11 +1,18 @@
 import type {
   ActionItem,
+  AppNotification,
   Board,
   BoardSummary,
+  Comment,
   Member,
   Plan,
   PlanCatalogItem,
+  Project,
+  ProjectColor,
+  ProjectSummary,
+  RollupTask,
   Role,
+  ShareInfo,
   SubscriptionInfo,
   User,
   ViewerInfo,
@@ -56,18 +63,33 @@ export function setAuthToken(token: string | null): void {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  timeoutMs?: number,
+): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
   };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
-  const res = await fetch(`${API_BASE}/api${path}`, {
-    credentials: 'include',
-    ...options,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api${path}`, {
+      credentials: 'include',
+      ...options,
+      headers,
+      // A timeout guarantees the promise settles, so callers never get stuck in a
+      // loading state on a hung request (e.g. a slow AI call that never returns).
+      signal: timeoutMs != null ? AbortSignal.timeout(timeoutMs) : options.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new ApiError(408, 'This took too long and timed out. Please try again.');
+    }
+    throw new ApiError(0, 'Network error — please check your connection and try again.');
+  }
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
@@ -106,10 +128,41 @@ export const api = {
     me: () => request<{ user: User }>('/auth/me'),
   },
 
+  projects: {
+    list: () => request<{ projects: ProjectSummary[] }>('/projects'),
+    create: (input: { name: string; description?: string; color?: ProjectColor }) =>
+      request<{ project: ProjectSummary }>('/projects', { method: 'POST', body: body(input) }),
+    get: (id: string) =>
+      request<{ project: Project; boards: BoardSummary[] }>(`/projects/${id}`),
+    update: (
+      id: string,
+      updates: Partial<{ name: string; description: string | null; color: ProjectColor; archived: boolean }>,
+    ) => request<{ project: Project }>(`/projects/${id}`, { method: 'PATCH', body: body(updates) }),
+    remove: (id: string) => request<{ ok: true }>(`/projects/${id}`, { method: 'DELETE' }),
+    tasks: (id: string) =>
+      request<{ tasks: RollupTask[]; boards: { id: string; name: string }[] }>(
+        `/projects/${id}/tasks`,
+      ),
+    members: (id: string) => request<{ members: Member[] }>(`/projects/${id}/members`),
+    addMember: (id: string, email: string, role: Exclude<Role, 'OWNER'> = 'EDITOR') =>
+      request<{ ok: true }>(`/projects/${id}/members`, { method: 'POST', body: body({ email, role }) }),
+    removeMember: (id: string, userId: string) =>
+      request<{ ok: true }>(`/projects/${id}/members/${userId}`, { method: 'DELETE' }),
+    share: (id: string, role: Exclude<Role, 'OWNER'> = 'EDITOR') =>
+      request<{ share: ShareInfo }>(`/projects/${id}/share`, { method: 'POST', body: body({ role }) }),
+    unshare: (id: string) =>
+      request<{ share: ShareInfo }>(`/projects/${id}/share`, { method: 'DELETE' }),
+    join: (token: string) =>
+      request<{ projectId: string }>('/projects/join', { method: 'POST', body: body({ token }) }),
+  },
+
   boards: {
     list: () => request<{ boards: BoardSummary[] }>('/boards'),
-    create: (name: string) =>
-      request<{ board: Board }>('/boards', { method: 'POST', body: body({ name }) }),
+    create: (name: string, projectId?: string) =>
+      request<{ board: Board }>('/boards', {
+        method: 'POST',
+        body: body(projectId ? { name, projectId } : { name }),
+      }),
     get: (id: string) => request<{ board: Board; viewer: ViewerInfo }>(`/boards/${id}`),
     rename: (id: string, name: string) =>
       request<{ board: Board }>(`/boards/${id}`, { method: 'PATCH', body: body({ name }) }),
@@ -122,16 +175,30 @@ export const api = {
       }),
 
     analyze: (id: string, transcript: string) =>
-      request<{ board: Board }>(`/boards/${id}/analyze`, {
-        method: 'POST',
-        body: body({ transcript }),
-      }),
+      request<{ board: Board }>(
+        `/boards/${id}/analyze`,
+        { method: 'POST', body: body({ transcript }) },
+        10 * 60 * 1000, // AI analysis can be slow; cap at 10 min so it can't hang forever.
+      ),
 
     members: (id: string) => request<{ members: Member[] }>(`/boards/${id}/members`),
     addMember: (id: string, email: string, role: Exclude<Role, 'OWNER'> = 'EDITOR') =>
       request<{ ok: true }>(`/boards/${id}/members`, { method: 'POST', body: body({ email, role }) }),
     removeMember: (id: string, userId: string) =>
       request<{ ok: true }>(`/boards/${id}/members/${userId}`, { method: 'DELETE' }),
+    share: (id: string, role: Exclude<Role, 'OWNER'> = 'EDITOR') =>
+      request<{ share: ShareInfo }>(`/boards/${id}/share`, { method: 'POST', body: body({ role }) }),
+    unshare: (id: string) =>
+      request<{ share: ShareInfo }>(`/boards/${id}/share`, { method: 'DELETE' }),
+
+    // Task-level comments (the "Activity" tab on an action item).
+    itemComments: (id: string, itemId: string) =>
+      request<{ comments: Comment[] }>(`/boards/${id}/items/${itemId}/comments`),
+    addItemComment: (id: string, itemId: string, text: string) =>
+      request<{ comments: Comment[] }>(`/boards/${id}/items/${itemId}/comments`, {
+        method: 'POST',
+        body: body({ text }),
+      }),
 
     addItem: (id: string, item: Partial<ActionItem>) =>
       request<{ board: Board }>(`/boards/${id}/items`, { method: 'POST', body: body(item) }),
@@ -148,6 +215,12 @@ export const api = {
         method: 'POST',
         body: body({ text }),
       }),
+  },
+
+  notifications: {
+    list: () =>
+      request<{ notifications: AppNotification[]; unread: number }>('/notifications'),
+    markAllRead: () => request<{ ok: true }>('/notifications/read', { method: 'POST' }),
   },
 
   billing: {

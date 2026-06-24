@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { KanbanSquare, Sun, Moon, LogOut, ChevronDown, CreditCard } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { useDarkMode } from '../hooks/useDarkMode';
+import { NotificationBell } from './NotificationBell';
 
 function initials(name: string): string {
   return name
@@ -47,6 +48,7 @@ export function Header({ center, actions }: HeaderProps) {
 
       <div className="flex items-center gap-2 sm:gap-3">
         {actions}
+        <NotificationBell />
         <button
           onClick={toggleDark}
           aria-label="Toggle theme"

@@ -7,6 +7,8 @@ interface ChatWidgetProps {
   comments: Comment[];
   canEdit: boolean;
   onAddComment: (text: string) => void;
+  /** Names available for @mention autocomplete + highlighting. */
+  people?: string[];
   /** Unread comments from other users (shown on the closed bubble). */
   unread: number;
   open: boolean;
@@ -15,7 +17,7 @@ interface ChatWidgetProps {
 
 /** Floating "Team Comments" chat: a bubble bottom-right that opens a chat window
  *  above it. Keeps the action-item board full-width when closed. */
-export function ChatWidget({ comments, canEdit, onAddComment, unread, open, onOpenChange }: ChatWidgetProps) {
+export function ChatWidget({ comments, canEdit, onAddComment, people, unread, open, onOpenChange }: ChatWidgetProps) {
   return (
     <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-3">
       {open && (
@@ -29,6 +31,7 @@ export function ChatWidget({ comments, canEdit, onAddComment, unread, open, onOp
             comments={comments}
             canEdit={canEdit}
             onAddComment={onAddComment}
+            people={people}
             onCollapse={() => onOpenChange(false)}
           />
         </motion.div>

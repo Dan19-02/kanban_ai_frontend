@@ -13,7 +13,8 @@ export interface SectionFocus {
 }
 
 interface TranscriptInputProps {
-  onAnalyze: (transcript: string) => Promise<void>;
+  /** Resolves true when analysis succeeded (so we can clear the box for the next one). */
+  onAnalyze: (transcript: string) => Promise<boolean>;
   isAnalyzing: boolean;
   analysis: MeetingAnalysis | null;
   canEdit: boolean;
@@ -71,11 +72,14 @@ export function TranscriptInput({ onAnalyze, isAnalyzing, analysis, canEdit, foc
     return () => cancelAnimationFrame(id);
   }, [focus]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (text.trim() && !isAnalyzing) {
-      onAnalyze(text.trim());
-    }
+    const trimmed = text.trim();
+    if (!trimmed || isAnalyzing) return;
+    // Clear the box only on success so the next meeting can be pasted straight
+    // in; on failure we keep the text so the user can retry without re-pasting.
+    const ok = await onAnalyze(trimmed);
+    if (ok) setText('');
   };
 
   const getSentimentColor = (score: string) => {

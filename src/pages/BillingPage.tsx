@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import {
-  Check, Loader2, AlertCircle, Sparkles, CreditCard, Settings, CheckCircle2,
+  Check, Loader2, AlertCircle, Sparkles, CreditCard, Settings, CheckCircle2, ArrowLeft,
 } from 'lucide-react';
 import { Header } from '../components/Header';
 import { UsageMeter } from '../components/UsageMeter';
@@ -72,6 +72,13 @@ export function BillingPage() {
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col font-sans transition-colors">
       <Header />
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 md:p-8">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 mb-4 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back to dashboard
+        </Link>
+
         <div className="mb-8">
           <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Plans & billing</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
