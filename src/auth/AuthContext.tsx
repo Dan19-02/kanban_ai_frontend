@@ -44,7 +44,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    await api.auth.logout();
+    try {
+      await api.auth.logout();
+    } catch {
+      // The local token is already dropped. Signing out here must not depend on
+      // the server answering.
+    }
     setUser(null);
   }, []);
 

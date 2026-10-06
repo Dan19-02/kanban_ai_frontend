@@ -5,7 +5,11 @@ import '@fontsource-variable/public-sans';
 import '@fontsource-variable/besley';
 import App from './App.tsx';
 import { AuthProvider } from './auth/AuthContext';
+import { restorePathAfterRedirect } from './lib/lastPath';
 import './index.css';
+
+// Must run before the router reads the address.
+restorePathAfterRedirect();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -1,7 +1,8 @@
-import React, { lazy, Suspense } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { rememberPath } from './lib/lastPath';
 import { FullScreenLoader } from './ui/bits';
 
 // Code-split each page so the initial load (auth check + login) stays small.
@@ -32,6 +33,11 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const location = useLocation();
+  useEffect(() => {
+    rememberPath(location.pathname + location.search + location.hash);
+  }, [location]);
+
   return (
     <Suspense fallback={<FullScreenLoader />}>
       <Routes>
