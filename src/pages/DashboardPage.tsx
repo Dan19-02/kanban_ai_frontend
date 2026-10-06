@@ -1,16 +1,28 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import {
-  Plus, Loader2, FolderKanban, Trash2, KanbanSquare, ListChecks, X, AlertCircle, Zap,
-  Users, Sparkles,
-} from 'lucide-react';
+import { FolderPlus, Plus, Trash2 } from 'lucide-react';
 import { Header } from '../components/Header';
 import { UsageMeter } from '../components/UsageMeter';
 import { useAuth } from '../auth/AuthContext';
 import { api, ApiError } from '../api/client';
 import type { BoardSummary, ProjectColor, ProjectSummary } from '../types';
-import { colorClasses, PROJECT_COLORS } from '../lib/projectColors';
+import { count } from '../lib/format';
+import { SAMPLE_BOARD_NAME } from '../lib/sampleTranscript';
 import { timeAgo } from '../lib/time';
+import { usePageTitle } from '../lib/title';
+import { ColorPicker, EmptyPage, Notice, PageHead, Spine } from '../ui/bits';
+import { Button, IconButton } from '../ui/Button';
+import { ConfirmDialog, Dialog } from '../ui/Dialog';
+import { Field, TextArea, TextInput } from '../ui/Field';
+
+type PendingDelete = { kind: 'project'; item: ProjectSummary } | { kind: 'board'; item: BoardSummary };
+
+const ROLE_LABEL: Record<BoardSummary['role'], string> = { OWNER: 'Owner', EDITOR: 'Can edit', VIEWER: 'Can view' };
+
+function boardMeta(board: BoardSummary): string {
+  if (!board.hasAnalysis && board.itemCount === 0) return 'No minutes yet';
+  return `${count(board.itemCount, 'task')}, ${count(board.memberCount, 'person', 'people')}`;
+}
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -19,26 +31,38 @@ export function DashboardPage() {
   const [sharedBoards, setSharedBoards] = useState<BoardSummary[]>([]);
   const [unfiledBoards, setUnfiledBoards] = useState<BoardSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // New project
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [color, setColor] = useState<ProjectColor>('indigo');
   const [submitting, setSubmitting] = useState(false);
-  // Standalone "new board" (no project) — lower-friction path.
+  const [formError, setFormError] = useState<string | null>(null);
+  const projectFormId = useId();
+
+  // New standalone board (no project): the shortest path to a first board.
   const [creatingBoard, setCreatingBoard] = useState(false);
   const [boardName, setBoardName] = useState('');
   const [boardSubmitting, setBoardSubmitting] = useState(false);
+  const boardFormId = useId();
+  const [startingSample, setStartingSample] = useState(false);
+
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  usePageTitle('Projects');
 
   const load = () => {
     Promise.all([api.projects.list(), api.boards.list()])
       .then(([{ projects }, { boards }]) => {
         setProjects(projects);
-        // Boards shared with me (where I'm not the owner) live outside my projects.
+        // Boards shared with me (where I am not the owner) live outside my projects.
         setSharedBoards(boards.filter((b) => b.role !== 'OWNER'));
-        // My own boards not filed under any project ("standalone").
+        // My own boards that are not filed under any project.
         setUnfiledBoards(boards.filter((b) => b.role === 'OWNER' && b.projectId == null));
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load projects'));
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'Your projects could not be loaded. Reload the page to try again.'));
   };
 
   useEffect(load, []);
@@ -47,7 +71,7 @@ export function DashboardPage() {
     e.preventDefault();
     if (!name.trim()) return;
     setSubmitting(true);
-    setError(null);
+    setFormError(null);
     try {
       const { project } = await api.projects.create({
         name: name.trim(),
@@ -56,19 +80,8 @@ export function DashboardPage() {
       });
       navigate(`/project/${project.id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to create project');
+      setFormError(err instanceof ApiError ? err.message : 'The project was not created. Try again.');
       setSubmitting(false);
-    }
-  };
-
-  const handleDelete = async (e: React.MouseEvent, project: ProjectSummary) => {
-    e.stopPropagation();
-    if (!confirm(`Delete "${project.name}"? This cannot be undone.`)) return;
-    try {
-      await api.projects.remove(project.id);
-      setProjects((prev) => prev?.filter((p) => p.id !== project.id) ?? null);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to delete project');
     }
   };
 
@@ -76,400 +89,321 @@ export function DashboardPage() {
     e.preventDefault();
     if (!boardName.trim()) return;
     setBoardSubmitting(true);
-    setError(null);
+    setFormError(null);
     try {
-      const { board } = await api.boards.create(boardName.trim()); // no project = standalone
+      const { board } = await api.boards.create(boardName.trim()); // no project: standalone
       navigate(`/board/${board.id}`);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to create board');
+      setFormError(err instanceof ApiError ? err.message : 'The board was not created. Try again.');
       setBoardSubmitting(false);
     }
   };
 
-  const handleDeleteBoard = async (e: React.MouseEvent, board: BoardSummary) => {
-    e.stopPropagation();
-    if (!confirm(`Delete "${board.name}"? This cannot be undone.`)) return;
+  // Makes a board with the sample transcript already pasted, so the product can
+  // be tried without a transcript to hand. Nothing is analysed until asked.
+  const startSample = async () => {
+    setStartingSample(true);
+    setError(null);
     try {
-      await api.boards.remove(board.id);
-      setUnfiledBoards((prev) => prev.filter((b) => b.id !== board.id));
+      const { board } = await api.boards.create(SAMPLE_BOARD_NAME);
+      navigate(`/board/${board.id}`, { state: { sample: true } });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to delete board');
+      setError(err instanceof ApiError ? err.message : 'The sample board was not created. Try again.');
+      setStartingSample(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col font-sans transition-colors">
-      <Header
-        actions={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCreatingBoard(true)}
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-md text-sm font-semibold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm"
-            >
-              <KanbanSquare className="w-4 h-4" />
-              <span className="hidden sm:inline">New board</span>
-            </button>
-            <button
-              onClick={() => setCreating(true)}
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">New project</span>
-            </button>
-          </div>
-        }
-      />
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      if (pendingDelete.kind === 'project') {
+        await api.projects.remove(pendingDelete.item.id);
+        setProjects((prev) => prev?.filter((p) => p.id !== pendingDelete.item.id) ?? null);
+      } else {
+        await api.boards.remove(pendingDelete.item.id);
+        setUnfiledBoards((prev) => prev.filter((b) => b.id !== pendingDelete.item.id));
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'That could not be deleted. Try again.');
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
+    }
+  };
 
-      <main className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-8">
+  const openNewProject = () => {
+    setFormError(null);
+    setName('');
+    setDescription('');
+    setColor('indigo');
+    setCreating(true);
+  };
+  const openNewBoard = () => {
+    setFormError(null);
+    setBoardName('');
+    setCreatingBoard(true);
+  };
+
+  const openTasks = projects?.reduce((sum, p) => sum + p.openTaskCount, 0) ?? 0;
+  const nothingYet = projects !== null && projects.length === 0 && unfiledBoards.length === 0;
+
+  return (
+    <div className="min-h-dvh bg-paper">
+      <Header />
+
+      <main className="mx-auto w-full max-w-5xl px-4 pt-6 pb-20 md:px-8 md:pt-8">
+        <PageHead
+          title="Projects"
+          lead={
+            projects && projects.length > 0
+              ? `${count(projects.length, 'project')}, ${count(openTasks, 'open task')}`
+              : 'One board per meeting. Projects keep related meetings together.'
+          }
+          actions={
+            <>
+              <Button icon={<FolderPlus className="h-4 w-4" aria-hidden />} onClick={openNewProject}>
+                New project
+              </Button>
+              <Button variant="primary" icon={<Plus className="h-4 w-4" aria-hidden />} onClick={openNewBoard}>
+                New board
+              </Button>
+            </>
+          }
+        />
+
         {user && !user.usage.unlimited && (
-          <div
-            className={`mb-6 rounded-xl border p-4 flex items-center gap-4 flex-wrap ${
-              user.usage.remaining === 0
-                ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-900/50'
-                : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
-            }`}
-          >
-            <Zap className={`w-5 h-5 shrink-0 ${user.usage.remaining === 0 ? 'text-amber-500' : 'text-indigo-500'}`} />
-            <div className="flex-1 min-w-[220px]">
-              {user.usage.remaining === 0 ? (
-                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
-                  {user.plan === 'FREE'
-                    ? "You've used all 3 free transcriptions. Upgrade to keep analyzing."
-                    : "You've hit your monthly transcription limit. Upgrade for more."}
-                </p>
-              ) : (
-                <UsageMeter usage={user.usage} plan={user.plan} compact />
-              )}
-            </div>
-            <Link
-              to="/billing"
-              className="px-3 py-1.5 bg-indigo-600 text-white rounded-md text-xs font-semibold hover:bg-indigo-700 transition-colors shrink-0"
-            >
-              {user.plan === 'FREE' ? 'Upgrade' : 'Manage plan'}
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-rule py-3">
+            <UsageMeter usage={user.usage} plan={user.plan} />
+            <Link to="/billing" className="link text-sm">
+              {user.plan === 'FREE' ? 'See plans' : 'Manage plan'}
             </Link>
           </div>
         )}
 
-        {error && (
-          <div className="mb-6 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/50 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-800 dark:text-red-400">{error}</p>
-          </div>
-        )}
+        {error && <Notice className="mt-4">{error}</Notice>}
 
         {projects === null ? (
-          <div className="flex items-center justify-center py-24">
-            <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
-          </div>
-        ) : projects.length === 0 && unfiledBoards.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-              <FolderKanban className="w-7 h-7 text-slate-400" />
-            </div>
-            <p className="font-semibold text-slate-900 dark:text-slate-100">Nothing here yet</p>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 mb-5 max-w-sm">
-              Spin up a single board for a quick meeting, or create a project to group related
-              boards and track every task in one place.
+          !error && (
+            <p className="py-10 text-sm text-ink-3" role="status">
+              Loading your projects
             </p>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setCreatingBoard(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-md text-sm font-semibold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm"
-              >
-                <KanbanSquare className="w-4 h-4" /> New board
-              </button>
-              <button
-                onClick={() => setCreating(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-sm"
-              >
-                <Plus className="w-4 h-4" /> New project
-              </button>
-            </div>
+          )
+        ) : nothingYet ? (
+          <div className="mt-6">
+            <EmptyPage
+              title="Nothing on file yet"
+              actions={
+                <Button size="sm" loading={startingSample} onClick={startSample}>
+                  Try it with a sample meeting
+                </Button>
+              }
+            >
+              Paste a meeting transcript and get a board of tasks, each with an owner, a priority and a date. Use New
+              board above when you have a transcript, or try it first with a sample meeting.
+            </EmptyPage>
           </div>
         ) : (
           projects.length > 0 && (
-            <>
-              <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-6">Your projects</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {projects.map((project) => {
-                  const c = colorClasses(project.color);
-                  return (
-                    <div
-                      key={project.id}
-                      onClick={() => navigate(`/project/${project.id}`)}
-                      className={`group relative overflow-hidden bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 pl-6 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col gap-4 ${c.ring}`}
-                    >
-                      <span className={`absolute left-0 top-0 h-full w-1.5 ${c.bar}`} />
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${c.soft}`}>
-                            <FolderKanban className={`w-5 h-5 ${c.text}`} />
-                          </div>
-                          <h3 className="font-bold text-slate-900 dark:text-slate-100 leading-tight line-clamp-2">
-                            {project.name}
-                          </h3>
-                        </div>
-                        {project.role === 'OWNER' ? (
-                          <button
-                            onClick={(e) => handleDelete(e, project)}
-                            aria-label="Delete project"
-                            className="p-1.5 text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-all shrink-0"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        ) : (
-                          <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 shrink-0">
-                            Shared
-                          </span>
-                        )}
-                      </div>
-
-                      {project.description && (
-                        <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2 -mt-1">
-                          {project.description}
-                        </p>
-                      )}
-
-                      <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-auto">
-                        <span className="flex items-center gap-1">
-                          <KanbanSquare className="w-3.5 h-3.5" /> {project.boardCount}{' '}
-                          {project.boardCount === 1 ? 'board' : 'boards'}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <ListChecks className="w-3.5 h-3.5" /> {project.openTaskCount} open
-                        </span>
-                        <span className="ml-auto text-slate-400 dark:text-slate-500">
-                          {timeAgo(project.updatedAt)}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
+            <section aria-label="Your projects">
+              <div className="hidden border-b border-rule py-2 pr-11 pl-7 text-xs text-ink-3 sm:flex">
+                <span className="flex-1">Project</span>
+                <span className="w-24 text-right">Boards</span>
+                <span className="w-28 text-right">Open tasks</span>
+                <span className="w-24 text-right">Updated</span>
               </div>
-            </>
+              <ul>
+                {projects.map((project) => (
+                  <li key={project.id} className="relative flex items-center gap-4 border-b border-rule py-3.5 pl-1 transition-colors duration-150 hover:bg-wash">
+                    <Spine color={project.color} className="h-9 w-2" />
+                    <div className="min-w-0 flex-1">
+                      <Link
+                        to={`/project/${project.id}`}
+                        className="font-serif text-[1.0625rem] leading-snug font-semibold after:absolute after:inset-0"
+                      >
+                        {project.name}
+                      </Link>
+                      {project.description && <p className="mt-0.5 truncate text-sm text-ink-2">{project.description}</p>}
+                      <p className="mt-1 text-xs text-ink-3 sm:hidden">
+                        {count(project.boardCount, 'board')}, {project.openTaskCount} open, {timeAgo(project.updatedAt)}
+                      </p>
+                    </div>
+                    <span className="hidden w-24 shrink-0 text-right text-sm text-ink-2 tabular-nums sm:block">{project.boardCount}</span>
+                    <span className="hidden w-28 shrink-0 text-right text-sm text-ink-2 tabular-nums sm:block">{project.openTaskCount}</span>
+                    <span className="hidden w-24 shrink-0 text-right text-sm text-ink-3 sm:block">{timeAgo(project.updatedAt)}</span>
+                    {project.role === 'OWNER' ? (
+                      <IconButton
+                        label={`Delete ${project.name}`}
+                        tone="remove"
+                        onClick={() => setPendingDelete({ kind: 'project', item: project })}
+                        className="relative z-10"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </IconButton>
+                    ) : (
+                      <span className="w-9 shrink-0 text-center text-xs text-ink-3">Shared</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
           )
         )}
 
         {unfiledBoards.length > 0 && (
-          <>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mt-12 mb-2">Boards</h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-              Standalone boards that aren&apos;t in a project.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {unfiledBoards.map((board) => (
-                <div
-                  key={board.id}
-                  onClick={() => navigate(`/board/${board.id}`)}
-                  className="group bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md transition-all cursor-pointer flex flex-col gap-4"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="font-bold text-slate-900 dark:text-slate-100 leading-tight line-clamp-2">
-                      {board.name}
-                    </h3>
-                    <button
-                      onClick={(e) => handleDeleteBoard(e, board)}
-                      aria-label="Delete board"
-                      className="p-1.5 text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-all shrink-0"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-auto">
-                    <span className="flex items-center gap-1">
-                      <ListChecks className="w-3.5 h-3.5" /> {board.itemCount}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Users className="w-3.5 h-3.5" /> {board.memberCount}
-                    </span>
-                    {board.hasAnalysis && (
-                      <span className="flex items-center gap-1 text-indigo-500 dark:text-indigo-400">
-                        <Sparkles className="w-3.5 h-3.5" /> Analyzed
-                      </span>
-                    )}
-                    <span className="ml-auto text-slate-400 dark:text-slate-500">{timeAgo(board.updatedAt)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
+          <BoardList
+            title="Boards outside a project"
+            lead="Single meetings that are not filed under a project."
+            boards={unfiledBoards}
+            onDelete={(board) => setPendingDelete({ kind: 'board', item: board })}
+          />
         )}
 
         {sharedBoards.length > 0 && (
-          <>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mt-12 mb-2">
-              Shared with me
-            </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-              Boards other people have shared with you.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {sharedBoards.map((board) => (
-                <div
-                  key={board.id}
-                  onClick={() => navigate(`/board/${board.id}`)}
-                  className="group bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md transition-all cursor-pointer flex flex-col gap-4"
-                >
-                  <h3 className="font-bold text-slate-900 dark:text-slate-100 leading-tight line-clamp-2">
-                    {board.name}
-                  </h3>
-                  <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="flex items-center gap-1">
-                      <ListChecks className="w-3.5 h-3.5" /> {board.itemCount}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Users className="w-3.5 h-3.5" /> {board.memberCount}
-                    </span>
-                    {board.hasAnalysis && (
-                      <span className="flex items-center gap-1 text-indigo-500 dark:text-indigo-400">
-                        <Sparkles className="w-3.5 h-3.5" /> Analyzed
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between mt-auto pt-1">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">
-                      {board.role}
-                    </span>
-                    <span className="text-xs text-slate-400 dark:text-slate-500">{timeAgo(board.updatedAt)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
+          <BoardList title="Shared with you" lead="Boards other people have given you access to." boards={sharedBoards} showRole />
         )}
       </main>
 
       {creatingBoard && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800">
-              <h3 className="font-bold text-slate-900 dark:text-slate-100">New board</h3>
-              <button
-                onClick={() => setCreatingBoard(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleCreateBoard} className="p-5 flex flex-col gap-4">
-              <label className="block">
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Board name</span>
-                <input
-                  autoFocus
+        <Dialog
+          title="New board"
+          onClose={() => !boardSubmitting && setCreatingBoard(false)}
+          footer={
+            <>
+              <Button onClick={() => setCreatingBoard(false)} disabled={boardSubmitting}>
+                Cancel
+              </Button>
+              <Button type="submit" form={boardFormId} variant="primary" loading={boardSubmitting} disabled={!boardName.trim()}>
+                Create board
+              </Button>
+            </>
+          }
+        >
+          <form id={boardFormId} onSubmit={handleCreateBoard} className="flex flex-col gap-4">
+            {formError && <Notice>{formError}</Notice>}
+            <Field label="Board name" hint="Usually the meeting it comes from. It will sit outside any project.">
+              {(id) => (
+                <TextInput
+                  id={id}
+                  data-autofocus=""
                   value={boardName}
                   onChange={(e) => setBoardName(e.target.value)}
-                  placeholder="e.g. Mon standup, Client call…"
-                  disabled={boardSubmitting}
+                  placeholder="Monday standup"
                   maxLength={120}
-                  className="mt-1.5 w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
+                  disabled={boardSubmitting}
                 />
-              </label>
-              <p className="text-xs text-slate-400 dark:text-slate-500 -mt-2">
-                This board won&apos;t be in a project. You can use it on its own.
-              </p>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCreatingBoard(false)}
-                  className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={boardSubmitting || !boardName.trim()}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2"
-                >
-                  {boardSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  Create board
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+              )}
+            </Field>
+          </form>
+        </Dialog>
       )}
 
       {creating && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800">
-              <h3 className="font-bold text-slate-900 dark:text-slate-100">New project</h3>
-              <button
-                onClick={() => setCreating(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <form onSubmit={handleCreate} className="p-5 flex flex-col gap-4">
-              <label className="block">
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Project name</span>
-                <input
-                  autoFocus
+        <Dialog
+          title="New project"
+          onClose={() => !submitting && setCreating(false)}
+          footer={
+            <>
+              <Button onClick={() => setCreating(false)} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button type="submit" form={projectFormId} variant="primary" loading={submitting} disabled={!name.trim()}>
+                Create project
+              </Button>
+            </>
+          }
+        >
+          <form id={projectFormId} onSubmit={handleCreate} className="flex flex-col gap-4">
+            {formError && <Notice>{formError}</Notice>}
+            <Field label="Project name">
+              {(id) => (
+                <TextInput
+                  id={id}
+                  data-autofocus=""
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Acme Q3 Rollout"
-                  disabled={submitting}
+                  placeholder="Acme Q3 rollout"
                   maxLength={120}
-                  className="mt-1.5 w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
+                  disabled={submitting}
                 />
-              </label>
-              <label className="block">
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  Description <span className="text-slate-400 font-normal">(optional)</span>
-                </span>
-                <textarea
+              )}
+            </Field>
+            <Field label="Description" optional>
+              {(id) => (
+                <TextArea
+                  id={id}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="What is this project about?"
-                  disabled={submitting}
                   rows={2}
                   maxLength={500}
-                  className="mt-1.5 w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-900 dark:text-slate-100 resize-none"
+                  disabled={submitting}
+                  className="resize-none"
                 />
-              </label>
-              <div>
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Colour</span>
-                <div className="mt-2 flex items-center gap-2 flex-wrap">
-                  {PROJECT_COLORS.map((col) => {
-                    const c = colorClasses(col);
-                    return (
-                      <button
-                        key={col}
-                        type="button"
-                        aria-label={col}
-                        onClick={() => setColor(col)}
-                        className={`w-7 h-7 rounded-full ${c.dot} transition-transform ${
-                          color === col
-                            ? 'ring-2 ring-offset-2 ring-slate-400 dark:ring-offset-slate-900 scale-110'
-                            : 'hover:scale-110'
-                        }`}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setCreating(false)}
-                  className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting || !name.trim()}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2"
-                >
-                  {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  Create project
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+              )}
+            </Field>
+            <div>
+              <p className="mb-1.5 text-[0.8125rem] font-medium">Colour</p>
+              <ColorPicker value={color} onChange={setColor} />
+            </div>
+          </form>
+        </Dialog>
+      )}
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title={`Delete “${pendingDelete.item.name}”?`}
+          confirmLabel={pendingDelete.kind === 'project' ? 'Delete project' : 'Delete board'}
+          destructive
+          busy={deleting}
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        >
+          {pendingDelete.kind === 'project'
+            ? 'The project is removed for everyone it is shared with. A project that still has boards cannot be deleted: move or delete those first.'
+            : 'The board, its tasks, its minutes and its discussion are removed for everyone. This cannot be undone.'}
+        </ConfirmDialog>
       )}
     </div>
+  );
+}
+
+interface BoardListProps {
+  title: string;
+  lead: string;
+  boards: BoardSummary[];
+  showRole?: boolean;
+  onDelete?: (board: BoardSummary) => void;
+}
+
+function BoardList({ title, lead, boards, showRole = false, onDelete }: BoardListProps) {
+  return (
+    <section className="mt-12">
+      <h2 className="font-serif text-xl font-semibold">{title}</h2>
+      <p className="mt-1 border-b border-ink pb-3 text-sm text-ink-2">{lead}</p>
+      <ul>
+        {boards.map((board) => (
+          <li key={board.id} className="relative flex items-center gap-4 border-b border-rule py-3 pl-1 transition-colors duration-150 hover:bg-wash">
+            <div className="min-w-0 flex-1">
+              <Link to={`/board/${board.id}`} className="text-[0.9375rem] font-medium after:absolute after:inset-0">
+                {board.name}
+              </Link>
+              <p className="mt-0.5 text-[0.8125rem] text-ink-3">
+                {boardMeta(board)}
+                <span className="sm:hidden">, {timeAgo(board.updatedAt)}</span>
+              </p>
+            </div>
+            {showRole && <span className="shrink-0 text-[0.8125rem] text-ink-2">{ROLE_LABEL[board.role]}</span>}
+            <span className="hidden w-24 shrink-0 text-right text-sm text-ink-3 sm:block">{timeAgo(board.updatedAt)}</span>
+            {onDelete ? (
+              <IconButton label={`Delete ${board.name}`} tone="remove" onClick={() => onDelete(board)} className="relative z-10">
+                <Trash2 className="h-4 w-4" />
+              </IconButton>
+            ) : (
+              <span className="w-1 shrink-0" aria-hidden />
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

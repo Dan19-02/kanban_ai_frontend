@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Loader2, UserPlus, AlertCircle } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
-import { AuthShell, AuthField } from '../components/AuthShell';
+import { AuthShell } from '../components/AuthShell';
 import { ApiError } from '../api/client';
+import { usePageTitle } from '../lib/title';
+import { Notice, WAKING_COPY, useSlow } from '../ui/bits';
+import { Button } from '../ui/Button';
+import { Field, TextInput } from '../ui/Field';
 
 export function RegisterPage() {
   const { register } = useAuth();
@@ -17,12 +20,14 @@ export function RegisterPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const slow = useSlow(submitting);
+  usePageTitle('Create account');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
+      setError('Choose a password of at least 8 characters.');
       return;
     }
     setSubmitting(true);
@@ -30,7 +35,7 @@ export function RegisterPage() {
       await register(name.trim(), email.trim(), password);
       navigate(redirectTo, { replace: true });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Unable to create account. Please try again.');
+      setError(err instanceof ApiError ? err.message : 'The account was not created. Try again.');
     } finally {
       setSubmitting(false);
     }
@@ -39,62 +44,67 @@ export function RegisterPage() {
   return (
     <AuthShell
       title="Create your account"
-      subtitle="Turn meeting transcripts into action boards"
+      subtitle="Free to start: your first 3 transcriptions are included."
       footer={
         <>
           Already have an account?{' '}
-          <Link to="/login" state={location.state} className="font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
+          <Link to="/login" state={location.state} className="link">
             Sign in
           </Link>
         </>
       }
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        {error && (
-          <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/50 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-800 dark:text-red-400">{error}</p>
-          </div>
-        )}
-        <AuthField
-          label="Name"
-          type="text"
-          autoComplete="name"
-          required
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Ada Lovelace"
-          disabled={submitting}
-        />
-        <AuthField
-          label="Email"
-          type="email"
-          autoComplete="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@example.com"
-          disabled={submitting}
-        />
-        <AuthField
-          label="Password"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={8}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="At least 8 characters"
-          disabled={submitting}
-        />
-        <button
-          type="submit"
-          disabled={submitting}
-          className="mt-2 px-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-colors flex items-center justify-center gap-2"
-        >
-          {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+        {error && <Notice>{error}</Notice>}
+        <Field label="Name" hint="Shown to teammates on tasks and comments.">
+          {(id) => (
+            <TextInput
+              id={id}
+              type="text"
+              autoComplete="name"
+              required
+              maxLength={80}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={submitting}
+            />
+          )}
+        </Field>
+        <Field label="Email">
+          {(id) => (
+            <TextInput
+              id={id}
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={submitting}
+            />
+          )}
+        </Field>
+        <Field label="Password" hint="At least 8 characters.">
+          {(id) => (
+            <TextInput
+              id={id}
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={submitting}
+            />
+          )}
+        </Field>
+        <Button type="submit" variant="primary" loading={submitting} className="mt-1 w-full">
           Create account
-        </button>
+        </Button>
+        {slow && (
+          <p className="text-[0.8125rem] leading-relaxed text-ink-2" role="status">
+            {WAKING_COPY}
+          </p>
+        )}
       </form>
     </AuthShell>
   );

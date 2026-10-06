@@ -10,3 +10,8 @@ coverage/
 .env*
 !.env.example
 !.env.production
+
+# Design review captures and mockups (working files, not source)
+.impeccable/review/
+.impeccable/mocks/
+.impeccable/build/

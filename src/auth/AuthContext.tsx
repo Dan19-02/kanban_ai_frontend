@@ -24,7 +24,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .me()
       .then(({ user }) => setUser(user))
       .catch((err) => {
-        // 401 simply means "not logged in" — anything else is unexpected.
+        // 401 simply means "not logged in"; anything else is unexpected.
         if (!(err instanceof ApiError) || err.status !== 401) {
           console.error('Failed to restore session:', err);
         }
@@ -44,7 +44,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    await api.auth.logout();
+    try {
+      await api.auth.logout();
+    } catch {
+      // The local token is already dropped. Signing out here must not depend on
+      // the server answering.
+    }
     setUser(null);
   }, []);
 
@@ -53,7 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { user } = await api.auth.me();
       setUser(user);
     } catch {
-      // Ignore — a failed refresh shouldn't disrupt the current session.
+      // Ignore: a failed refresh shouldn't disrupt the current session.
     }
   }, []);
 

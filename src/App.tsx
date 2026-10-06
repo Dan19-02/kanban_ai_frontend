@@ -1,11 +1,12 @@
-import React, { lazy, Suspense } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
 import { useAuth } from './auth/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { rememberPath } from './lib/lastPath';
+import { FullScreenLoader } from './ui/bits';
 
 // Code-split each page so the initial load (auth check + login) stays small.
-// The heavy board view (kanban, motion, socket.io) is only fetched when needed.
+// The heavy board view (lanes, socket.io) is only fetched when needed.
 const LoginPage = lazy(() => import('./pages/LoginPage').then((m) => ({ default: m.LoginPage })));
 const RegisterPage = lazy(() => import('./pages/RegisterPage').then((m) => ({ default: m.RegisterPage })));
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
@@ -13,25 +14,17 @@ const ProjectPage = lazy(() => import('./pages/ProjectPage').then((m) => ({ defa
 const BoardPage = lazy(() => import('./pages/BoardPage').then((m) => ({ default: m.BoardPage })));
 const BillingPage = lazy(() => import('./pages/BillingPage').then((m) => ({ default: m.BillingPage })));
 
-function FullScreenLoader() {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-      <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
-    </div>
-  );
-}
-
 /** Routes available only to logged-out users; authed users skip to the app. */
 function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const location = useLocation();
   if (loading) return <FullScreenLoader />;
   // Send an already-authenticated user to where they were headed (e.g. a shared
-  // board link captured as `from` on the way through auth) — not always home.
+  // board link captured as `from` on the way through auth), not always home.
   // This MUST match the post-login/register redirect: when register() sets the
   // user, this redirect and the page's navigate(from) both fire, and under
   // React 19's batched updates either may win. If they disagree (this one going
-  // to "/"), the share token in `from` is lost and the board never loads.
+  // to "/"), the destination in `from` is lost and the board never loads.
   if (user) {
     const from = (location.state as { from?: string } | null)?.from;
     return <Navigate to={from ?? '/'} replace />;
@@ -40,6 +33,11 @@ function PublicOnlyRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const location = useLocation();
+  useEffect(() => {
+    rememberPath(location.pathname + location.search + location.hash);
+  }, [location]);
+
   return (
     <Suspense fallback={<FullScreenLoader />}>
       <Routes>

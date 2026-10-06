@@ -18,7 +18,8 @@ interface UseBoardResult {
   moveItem: (itemId: string, assignee: string) => Promise<void>;
   updateItem: (itemId: string, updates: Partial<ActionItem>) => Promise<void>;
   deleteItem: (itemId: string) => Promise<void>;
-  addItem: (item: Partial<ActionItem>) => Promise<void>;
+  /** Resolves to the task that was just created. */
+  addItem: (item: Partial<ActionItem>) => Promise<ActionItem | undefined>;
   addComment: (text: string) => Promise<void>;
   getTaskComments: (itemId: string) => Promise<Comment[]>;
   addTaskComment: (itemId: string, text: string) => Promise<Comment[]>;
@@ -98,6 +99,14 @@ export function useBoard(boardId: string): UseBoardResult {
 
   const canEdit = board?.role === 'OWNER' || board?.role === 'EDITOR';
 
+  // Task and comment endpoints answer with the board serialized as an editor's
+  // view, whoever asked. The role cannot change through those calls, so keep the
+  // one the board was loaded with; otherwise an owner loses owner-only controls
+  // (such as Share) the moment they edit a task.
+  const applyMutation = useCallback((next: Board) => {
+    setBoard((prev) => (prev ? { ...next, role: prev.role } : next));
+  }, []);
+
   const analyze = useCallback(
     async (transcript: string) => {
       const { board } = await api.boards.analyze(boardId, transcript);
@@ -116,7 +125,7 @@ export function useBoard(boardId: string): UseBoardResult {
       );
       try {
         const { board } = await api.boards.updateItem(boardId, itemId, updates);
-        setBoard(board);
+        applyMutation(board);
       } catch (err) {
         // Re-sync with the server's truth on failure.
         const { board } = await api.boards.get(boardId);
@@ -124,7 +133,7 @@ export function useBoard(boardId: string): UseBoardResult {
         throw err;
       }
     },
-    [boardId],
+    [boardId, applyMutation],
   );
 
   const moveItem = useCallback(
@@ -150,17 +159,19 @@ export function useBoard(boardId: string): UseBoardResult {
   const addItem = useCallback(
     async (item: Partial<ActionItem>) => {
       const { board } = await api.boards.addItem(boardId, item);
-      setBoard(board);
+      applyMutation(board);
+      // New tasks take the next position, so the created one is last.
+      return board.actionItems[board.actionItems.length - 1];
     },
-    [boardId],
+    [boardId, applyMutation],
   );
 
   const addComment = useCallback(
     async (text: string) => {
       const { board } = await api.boards.addComment(boardId, text);
-      setBoard(board);
+      applyMutation(board);
     },
-    [boardId],
+    [boardId, applyMutation],
   );
 
   // Task-level comments are fetched on demand (when a task is opened) rather than

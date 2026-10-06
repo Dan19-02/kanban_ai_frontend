@@ -1,13 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
-import {
-  Check, Loader2, AlertCircle, Sparkles, CreditCard, Settings, CheckCircle2, ArrowLeft,
-} from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { UsageMeter } from '../components/UsageMeter';
 import { api, ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { usePageTitle } from '../lib/title';
 import type { PlanCatalogItem, SubscriptionInfo, Plan } from '../types';
+import { Notice, PageHead } from '../ui/bits';
+import { Button } from '../ui/Button';
 
 const PLAN_ORDER: Record<Plan, number> = { FREE: 0, STARTER: 1, PRO: 2, UNLIMITED: 3 };
 
@@ -21,18 +21,20 @@ export function BillingPage() {
 
   const checkoutStatus = params.get('status'); // 'success' | 'cancel' | null
 
+  usePageTitle('Plans and billing');
+
   const load = () => {
     Promise.all([api.billing.plans(), api.billing.subscription()])
       .then(([p, s]) => {
         setPlans(p.plans);
         setSub(s);
       })
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'Failed to load billing'));
+      .catch((err) => setError(err instanceof ApiError ? err.message : 'Plans could not be loaded. Reload the page to try again.'));
   };
 
   useEffect(load, []);
 
-  // After returning from Stripe Checkout, refresh plan/usage (webhook may lag).
+  // After returning from checkout, refresh plan and usage (the confirmation can lag a moment).
   useEffect(() => {
     if (checkoutStatus === 'success') {
       refreshUser();
@@ -49,7 +51,7 @@ export function BillingPage() {
       const { url } = await api.billing.checkout(plan as Exclude<Plan, 'FREE'>);
       window.location.href = url;
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not start checkout');
+      setError(err instanceof ApiError ? err.message : 'Checkout did not start. Try again.');
       setBusyPlan(null);
     }
   };
@@ -61,162 +63,111 @@ export function BillingPage() {
       const { url } = await api.billing.portal();
       window.location.href = url;
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not open billing portal');
+      setError(err instanceof ApiError ? err.message : 'The billing portal did not open. Try again.');
       setBusyPlan(null);
     }
   };
 
   const currentPlan = sub?.plan ?? 'FREE';
+  const dismiss = () => setParams({}, { replace: true });
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col font-sans transition-colors">
-      <Header />
-      <main className="flex-1 max-w-5xl w-full mx-auto p-4 md:p-8">
-        <Link
-          to="/"
-          className="inline-flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 mb-4 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" /> Back to dashboard
-        </Link>
+    <div className="min-h-dvh bg-paper">
+      <Header crumbs={[{ label: 'Plans and billing' }]} />
+      <main className="mx-auto w-full max-w-5xl px-4 pt-6 pb-20 md:px-8 md:pt-8">
+        <PageHead title="Plans and billing" lead="A transcription is one AI reading of a meeting transcript." />
 
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">Plans & billing</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            A transcription is one AI analysis of a meeting transcript.
-          </p>
+        {sub && (
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-rule py-3">
+            <UsageMeter usage={sub.usage} plan={sub.plan} />
+            {sub.canManage && (
+              <Button loading={busyPlan === '__manage__'} onClick={manage}>
+                Manage subscription
+              </Button>
+            )}
+          </div>
+        )}
+
+        <div className="mt-4 flex flex-col gap-3 empty:hidden">
+          {checkoutStatus === 'success' && (
+            <Notice tone="success">
+              Your subscription is confirmed. The new plan can take a few seconds to show here.{' '}
+              <button type="button" className="link" onClick={dismiss}>
+                Dismiss
+              </button>
+            </Notice>
+          )}
+          {checkoutStatus === 'cancel' && (
+            <Notice tone="info">
+              Checkout was cancelled and nothing was charged.{' '}
+              <button type="button" className="link" onClick={dismiss}>
+                Dismiss
+              </button>
+            </Notice>
+          )}
+          {error && <Notice>{error}</Notice>}
+          {sub && !sub.billingEnabled && (
+            <Notice tone="info">Payments are not set up on this server yet, so paid plans cannot be bought here.</Notice>
+          )}
         </div>
 
-        {checkoutStatus === 'success' && (
-          <div className="mb-6 p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-900/50 flex items-start gap-3">
-            <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Subscription active</p>
-              <p className="text-sm text-emerald-700 dark:text-emerald-400">
-                Thanks! Your plan is being activated — it may take a few seconds to reflect here.
-              </p>
-            </div>
-            <button onClick={() => setParams({}, { replace: true })} className="ml-auto text-emerald-600 dark:text-emerald-400 text-sm font-medium">
-              Dismiss
-            </button>
-          </div>
-        )}
-        {checkoutStatus === 'cancel' && (
-          <div className="mb-6 p-4 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-900/50 flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0" />
-            <p className="text-sm text-amber-800 dark:text-amber-400">Checkout canceled — no charge was made.</p>
-            <button onClick={() => setParams({}, { replace: true })} className="ml-auto text-amber-600 dark:text-amber-400 text-sm font-medium">
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {error && (
-          <div className="mb-6 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/50 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-800 dark:text-red-400">{error}</p>
-          </div>
-        )}
-
-        {/* Current usage */}
-        {sub && (
-          <div className="mb-8 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <div className="flex-1 min-w-[240px]">
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-                  Current plan: <span className="text-indigo-600 dark:text-indigo-400">{sub.plan}</span>
-                </p>
-                <UsageMeter usage={sub.usage} plan={sub.plan} />
-              </div>
-              {sub.canManage && (
-                <button
-                  onClick={manage}
-                  disabled={busyPlan === '__manage__'}
-                  className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg text-sm font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
-                >
-                  {busyPlan === '__manage__' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Settings className="w-4 h-4" />}
-                  Manage subscription
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {sub && !sub.billingEnabled && (
-          <div className="mb-6 p-3 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              Payments aren&apos;t configured on this server yet, so upgrades are disabled.
-            </p>
-          </div>
-        )}
-
-        {/* Plan cards */}
         {plans === null ? (
-          <div className="flex justify-center py-16">
-            <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
-          </div>
+          !error && (
+            <p className="py-10 text-sm text-ink-3" role="status">
+              Loading plans
+            </p>
+          )
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="mt-8 grid grid-cols-1 border-t border-ink sm:grid-cols-2 lg:grid-cols-4">
             {plans.map((plan) => {
               const isCurrent = plan.id === currentPlan;
               const isDowngrade = PLAN_ORDER[plan.id] < PLAN_ORDER[currentPlan];
-              const featured = plan.id === 'PRO';
               return (
-                <div
+                <section
                   key={plan.id}
-                  className={`relative rounded-2xl border p-5 flex flex-col bg-white dark:bg-slate-900 shadow-sm ${
-                    featured ? 'border-indigo-300 dark:border-indigo-700 ring-1 ring-indigo-200 dark:ring-indigo-800' : 'border-slate-200 dark:border-slate-800'
-                  }`}
+                  aria-label={`${plan.name} plan`}
+                  className="flex flex-col border-b border-rule px-1 py-5 sm:px-5 sm:first:pl-1 lg:border-r lg:last:border-r-0"
                 >
-                  {featured && (
-                    <span className="absolute -top-2.5 left-5 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-indigo-600 text-white">
-                      Popular
-                    </span>
-                  )}
-                  <h3 className="font-bold text-slate-900 dark:text-slate-100">{plan.name}</h3>
-                  <div className="mt-2 mb-1 flex items-baseline gap-1">
-                    <span className="text-2xl font-bold text-slate-900 dark:text-slate-100">${plan.priceUsd}</span>
-                    <span className="text-sm text-slate-500 dark:text-slate-400">
-                      /{plan.interval === 'month' ? 'mo' : 'forever'}
-                    </span>
-                  </div>
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-4 min-h-[40px]">{plan.tagline}</p>
-                  <div className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 mb-5">
-                    <Check className="w-4 h-4 text-emerald-500 shrink-0" />
-                    {plan.limit === null ? 'Unlimited transcriptions' : `${plan.limit} transcriptions`}
-                  </div>
+                  <h2 className="font-serif text-lg font-semibold">
+                    {plan.name}
+                    {isCurrent && <span className="ml-2 font-sans text-xs font-medium text-ink-2">Your plan</span>}
+                  </h2>
+                  <p className="mt-3 flex items-baseline gap-1.5">
+                    <span className="font-serif text-[2rem] leading-none font-semibold tabular-nums">${plan.priceUsd}</span>
+                    <span className="text-sm text-ink-3">{plan.interval === 'month' ? 'per month' : 'no charge'}</span>
+                  </p>
+                  <p className="mt-3 text-sm leading-relaxed text-ink-2">
+                    {plan.limit === null
+                      ? 'Unlimited transcriptions.'
+                      : plan.interval === 'month'
+                        ? `${plan.limit} transcriptions each month.`
+                        : `${plan.limit} transcriptions in total, to try it out.`}
+                  </p>
 
-                  <div className="mt-auto">
+                  <div className="mt-6 pt-1 sm:mt-auto sm:pt-8">
                     {isCurrent ? (
-                      <div className="w-full px-4 py-2 rounded-lg text-sm font-semibold text-center bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
-                        Current plan
-                      </div>
+                      <p className="flex h-9 items-center text-sm text-ink-3">You are on this plan</p>
                     ) : plan.id === 'FREE' || isDowngrade ? (
-                      <button
-                        onClick={manage}
-                        disabled={!sub?.canManage || busyPlan === '__manage__'}
-                        className="w-full px-4 py-2 rounded-lg text-sm font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {sub?.canManage ? 'Switch in portal' : 'Included'}
-                      </button>
+                      sub?.canManage ? (
+                        <Button className="w-full" loading={busyPlan === '__manage__'} onClick={manage}>
+                          Switch in billing portal
+                        </Button>
+                      ) : (
+                        <p className="flex h-9 items-center text-sm text-ink-3">Included with every account</p>
+                      )
                     ) : (
-                      <button
+                      <Button
+                        variant="primary"
+                        className="w-full"
+                        loading={busyPlan === plan.id}
+                        disabled={!plan.purchasable}
                         onClick={() => upgrade(plan.id)}
-                        disabled={!plan.purchasable || busyPlan === plan.id}
-                        className="w-full px-4 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       >
-                        {busyPlan === plan.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <>
-                            {currentPlan === 'FREE' ? <Sparkles className="w-4 h-4" /> : <CreditCard className="w-4 h-4" />}
-                            {currentPlan === 'FREE' ? 'Upgrade' : 'Switch'}
-                          </>
-                        )}
-                      </button>
+                        {currentPlan === 'FREE' ? `Upgrade to ${plan.name}` : `Switch to ${plan.name}`}
+                      </Button>
                     )}
                   </div>
-                </div>
+                </section>
               );
             })}
           </div>

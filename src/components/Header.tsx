@@ -1,30 +1,43 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { KanbanSquare, Sun, Moon, LogOut, ChevronDown, CreditCard } from 'lucide-react';
+import { ChevronDown, ChevronLeft, CreditCard, LogOut, Moon, Sun } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { useDarkMode } from '../hooks/useDarkMode';
 import { NotificationBell } from './NotificationBell';
+import { Initials, Mark } from '../ui/bits';
+import { IconButton } from '../ui/Button';
+import { Menu, menuItemClass } from '../ui/Menu';
+import type { User } from '../types';
 
-function initials(name: string): string {
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .substring(0, 2)
-    .toUpperCase();
+export interface Crumb {
+  label: string;
+  to?: string;
 }
 
 interface HeaderProps {
-  /** Optional content rendered next to the brand (e.g. board title). */
-  center?: React.ReactNode;
-  /** Optional action buttons rendered before the theme/user controls. */
-  actions?: React.ReactNode;
+  /** Where this page sits under the home screen. The last crumb is the current page. */
+  crumbs?: Crumb[];
+  /** Page-specific status shown before the global controls (e.g. who is here). */
+  aside?: React.ReactNode;
 }
 
-export function Header({ center, actions }: HeaderProps) {
+const PLAN_NAMES: Record<User['plan'], string> = {
+  FREE: 'Free',
+  STARTER: 'Starter',
+  PRO: 'Pro',
+  UNLIMITED: 'Unlimited',
+};
+
+function planLine(user: User): string {
+  const plan = `${PLAN_NAMES[user.plan]} plan`;
+  if (user.usage.unlimited) return `${plan}, unlimited transcriptions`;
+  return `${plan}, ${user.usage.remaining ?? 0} of ${user.usage.limit ?? 0} transcriptions left`;
+}
+
+/** The top bar: brand, where you are, and the controls that follow you everywhere. */
+export function Header({ crumbs = [], aside }: HeaderProps) {
   const { user, logout } = useAuth();
   const [isDark, toggleDark] = useDarkMode();
-  const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -32,81 +45,97 @@ export function Header({ center, actions }: HeaderProps) {
     navigate('/login', { replace: true });
   };
 
+  // Small screens have no room for the trail, so they get one labelled link to the level above.
+  const parent = crumbs.length > 1 ? crumbs[crumbs.length - 2] : crumbs.length === 1 ? { label: 'Projects', to: '/' } : null;
+
   return (
-    <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 md:px-6 flex items-center justify-between shrink-0 transition-colors">
-      <div className="flex items-center gap-3 min-w-0">
-        <Link to="/" className="flex items-center gap-2.5 shrink-0">
-          <div className="w-8 h-8 bg-indigo-600 rounded flex items-center justify-center">
-            <KanbanSquare className="w-5 h-5 text-white" />
-          </div>
-          <h1 className="font-bold text-lg tracking-tight text-slate-900 dark:text-slate-100 hidden sm:block">
-            TranscribeBoard
-          </h1>
-        </Link>
-        {center && <div className="min-w-0 flex items-center">{center}</div>}
-      </div>
+    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-1 border-b border-rule bg-paper px-3 sm:px-5">
+      <Link
+        to="/"
+        aria-label="TranscribeBoard, all projects"
+        className={`shrink-0 items-center gap-2 rounded-xs py-1 pr-1 ${crumbs.length ? 'hidden sm:flex' : 'flex'}`}
+      >
+        <Mark />
+        <span className={`font-serif text-[1.0625rem] font-semibold tracking-[-0.01em] ${crumbs.length ? 'hidden md:inline' : ''}`}>
+          TranscribeBoard
+        </span>
+      </Link>
 
-      <div className="flex items-center gap-2 sm:gap-3">
-        {actions}
-        <NotificationBell />
-        <button
-          onClick={toggleDark}
-          aria-label="Toggle theme"
-          className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+      {parent?.to && (
+        <Link
+          to={parent.to}
+          aria-label={`Back to ${parent.label}`}
+          className="-ml-1 flex h-9 min-w-0 items-center gap-0.5 rounded-xs pr-2 pl-1 text-sm font-medium text-ink transition-colors duration-150 hover:bg-wash sm:hidden"
         >
-          {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-        </button>
+          <ChevronLeft className="h-4 w-4 shrink-0 text-ink-2" aria-hidden />
+          <span className="truncate">{parent.label}</span>
+        </Link>
+      )}
 
-        <div className="relative">
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-          >
-            <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-xs font-bold">
-              {user ? initials(user.name) : '?'}
-            </div>
-            <span className="text-sm font-medium text-slate-700 dark:text-slate-300 hidden md:block max-w-[120px] truncate">
-              {user?.name}
-            </span>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-          </button>
+      {crumbs.length > 0 && (
+        <nav aria-label="Breadcrumb" className="hidden min-w-0 text-sm sm:block">
+          <ol className="flex min-w-0 items-center">
+            {crumbs.map((crumb, i) => {
+              const last = i === crumbs.length - 1;
+              return (
+                <li key={`${crumb.label}-${i}`} className="flex min-w-0 items-center">
+                  <span aria-hidden className="mx-2 text-rule-2 select-none">
+                    /
+                  </span>
+                  {crumb.to && !last ? (
+                    <Link to={crumb.to} className="max-w-[14rem] truncate text-ink-3 transition-colors duration-150 hover:text-ink">
+                      {crumb.label}
+                    </Link>
+                  ) : (
+                    <span aria-current={last ? 'page' : undefined} className="truncate font-medium text-ink">
+                      {crumb.label}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
+      )}
 
-          {menuOpen && (
+      <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
+        {aside}
+        <NotificationBell />
+        <IconButton label={isDark ? 'Switch to light theme' : 'Switch to dark theme'} onClick={toggleDark}>
+          {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        </IconButton>
+        <Menu
+          button={(trigger) => (
+            <button
+              type="button"
+              {...trigger}
+              aria-label="Account"
+              className="ml-1 flex h-9 items-center gap-2 rounded-xs pr-1.5 pl-1.5 transition-colors duration-150 hover:bg-wash"
+            >
+              <Initials name={user?.name ?? ''} />
+              <span className="hidden max-w-[9rem] truncate text-sm font-medium lg:block">{user?.name}</span>
+              <ChevronDown className="h-3.5 w-3.5 text-ink-3" aria-hidden />
+            </button>
+          )}
+        >
+          {(close) => (
             <>
-              <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-              <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-lg z-50 overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
-                      {user?.name}
-                    </p>
-                    {user && (
-                      <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 shrink-0">
-                        {user.plan}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user?.email}</p>
-                </div>
-                <Link
-                  to="/billing"
-                  onClick={() => setMenuOpen(false)}
-                  className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 transition-colors"
-                >
-                  <CreditCard className="w-4 h-4" />
-                  Plans & billing
-                </Link>
-                <button
-                  onClick={handleLogout}
-                  className="w-full px-4 py-2.5 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 transition-colors border-t border-slate-100 dark:border-slate-800"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Sign out
-                </button>
+              <div className="border-b border-rule px-3 pt-1.5 pb-2.5">
+                <p className="truncate text-sm font-medium">{user?.name}</p>
+                <p className="truncate text-xs text-ink-3">{user?.email}</p>
+                {user && <p className="mt-1.5 text-xs text-ink-2">{planLine(user)}</p>}
               </div>
+              <Link to="/billing" role="menuitem" onClick={close} className={menuItemClass}>
+                <CreditCard className="h-4 w-4 text-ink-3" aria-hidden />
+                Plans and billing
+              </Link>
+              <button type="button" role="menuitem" onClick={handleLogout} className={menuItemClass}>
+                <LogOut className="h-4 w-4 text-ink-3" aria-hidden />
+                Sign out
+              </button>
             </>
           )}
-        </div>
+        </Menu>
       </div>
     </header>
   );
