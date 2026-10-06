@@ -11,8 +11,9 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@fontsource-variable/besley": "^5.3.0",
+    "@fontsource-variable/public-sans": "^5.3.0",
     "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "react-router-dom": "^7.18.0",

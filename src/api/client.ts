@@ -33,7 +33,7 @@ export const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
 // --- Auth token (Bearer) -----------------------------------------------------
 // We authenticate with an `Authorization: Bearer` header so the app works
-// cross-origin on EVERY device — mobile browsers block third-party cookies,
+// cross-origin on EVERY device. Mobile browsers block third-party cookies,
 // which is what the cookie-only flow relied on. The httpOnly cookie still
 // works for same-origin deployments.
 const TOKEN_KEY = 'kanban_auth_token';
@@ -58,7 +58,7 @@ export function setAuthToken(token: string | null): void {
     if (token) localStorage.setItem(TOKEN_KEY, token);
     else localStorage.removeItem(TOKEN_KEY);
   } catch {
-    // Storage unavailable — the in-memory token still works this session.
+    // Storage unavailable: the in-memory token still works this session.
   }
 }
 
@@ -87,7 +87,7 @@ async function request<T>(
     if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
       throw new ApiError(408, 'This took too long and timed out. Please try again.');
     }
-    throw new ApiError(0, 'Network error — please check your connection and try again.');
+    throw new ApiError(0, 'Could not reach the server. Check your connection and try again.');
   }
 
   const data = await res.json().catch(() => null);

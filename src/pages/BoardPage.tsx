@@ -1,35 +1,25 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import {
-  DownloadCloud, AlertCircle, Loader2, Share2, Plus, ArrowLeft, Eye, Sparkles,
-  Brain, Columns3, FileText,
-} from 'lucide-react';
-import { Header } from '../components/Header';
-import { TranscriptInput, type SectionFocus } from '../components/TranscriptInput';
-import { KanbanBoard } from '../components/KanbanBoard';
-import { CommentsSection } from '../components/CommentsSection';
-import { ShareModal } from '../components/ShareModal';
-import { SetNameModal } from '../components/SetNameModal';
-import { BoardSummaryBar, type SummaryKey } from '../components/BoardSummaryBar';
-import { ChatWidget } from '../components/ChatWidget';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useLocation, useParams } from 'react-router-dom';
+import { ChevronDown, Download, MessageSquare, Plus, UserPlus } from 'lucide-react';
+import { Header, type Crumb } from '../components/Header';
+import { Minutes, type SectionFocus, type SectionKey } from '../components/Minutes';
+import { TaskLanes, type TaskFilter } from '../components/TaskLanes';
+import { Discussion } from '../components/Discussion';
+import { ShareDialog } from '../components/ShareDialog';
+import { SetNameDialog } from '../components/SetNameDialog';
 import { useBoard } from '../hooks/useBoard';
 import { useAuth } from '../auth/AuthContext';
-import { useMediaQuery } from '../hooks/useMediaQuery';
-import { ApiError } from '../api/client';
-import type { ActionItem } from '../types';
+import { api, ApiError } from '../api/client';
+import { isUnassigned, longDate } from '../lib/format';
+import { usePageTitle } from '../lib/title';
+import { FullScreenLoader, Notice, Tabs } from '../ui/bits';
+import { Button, buttonClass } from '../ui/Button';
+import { Menu, menuItemClass } from '../ui/Menu';
 
-type MobileTab = 'brain' | 'board';
+type MobileTab = 'tasks' | 'minutes';
 
-// Summary-bar chips that filter the Kanban board (the rest jump to an AI-Brain section).
-const BOARD_FILTERS: Partial<Record<SummaryKey, 'all' | 'completed' | 'high'>> = {
-  tasks: 'all',
-  done: 'completed',
-  high: 'high',
-  people: 'all',
-};
-
-// CSV/formula-injection-safe cell: neutralize a leading = + - @ / tab / CR, then
-// quote-escape per RFC 4180. Used for all CSV exports.
+// CSV and formula-injection safe cell: neutralise a leading = + - @ tab or CR,
+// then quote-escape per RFC 4180. Used for every export.
 const csvCell = (value: string): string => {
   const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
   return `"${guarded.replace(/"/g, '""')}"`;
@@ -50,14 +40,34 @@ const saveCsv = (filename: string, rows: string[]) => {
 export function BoardPage() {
   const { id } = useParams<{ id: string }>();
   if (!id) return null;
-  return <BoardView boardId={id} />;
+  return <BoardView key={id} boardId={id} />;
 }
 
-function CenteredMessage({ children }: { children: React.ReactNode }) {
+function Missing({ message }: { message: string }) {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 p-4 text-center">
-      {children}
+    <div className="flex min-h-dvh flex-col bg-paper">
+      <Header />
+      <main className="mx-auto w-full max-w-xl px-4 pt-16 md:px-8">
+        <h1 className="font-serif text-2xl font-semibold">This board is not available</h1>
+        <p className="mt-3 text-sm leading-relaxed text-ink-2">{message}</p>
+        <Link to="/" className={buttonClass('primary', 'md', 'mt-6')}>
+          Back to your projects
+        </Link>
+      </main>
     </div>
+  );
+}
+
+function Presence({ connected, names }: { connected: boolean; names: string[] }) {
+  const here = Math.max(names.length, 1);
+  return (
+    <span
+      title={connected && names.length ? `Here now: ${names.join(', ')}` : undefined}
+      className={`mr-1 hidden items-center gap-1.5 px-2 text-xs sm:inline-flex ${connected ? 'text-ink-2' : 'font-medium text-red'}`}
+    >
+      <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-ink' : 'bg-red'}`} />
+      {connected ? `${here} here` : 'Offline'}
+    </span>
   );
 }
 
@@ -69,54 +79,85 @@ function BoardView({ boardId }: { boardId: string }) {
     getTaskComments, addTaskComment,
   } = useBoard(boardId);
 
-  // People who can be @mentioned / are involved on this board: task assignees,
-  // anyone who has commented, and whoever is currently present.
+  const { user, refreshUser } = useAuth();
+  const location = useLocation();
+  const startWithSample = (location.state as { sample?: boolean } | null)?.sample === true;
+
+  const [mobileTab, setMobileTab] = useState<MobileTab>('tasks');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [showShare, setShowShare] = useState(false);
+  const [filter, setFilter] = useState<TaskFilter>('all');
+  const [focusSection, setFocusSection] = useState<SectionFocus | null>(null);
+  const focusNonce = useRef(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [newTaskId, setNewTaskId] = useState<string | null>(null);
+  const [addingTask, setAddingTask] = useState(false);
+  const [nameSkipped, setNameSkipped] = useState(false);
+  const [project, setProject] = useState<{ id: string; name: string } | null>(null);
+
+  // People who can be mentioned or are involved here: task owners, anyone who
+  // has commented, and whoever is present right now.
   const people = useMemo(() => {
     const set = new Set<string>();
     for (const it of board?.actionItems ?? []) {
-      if (it.assignee && it.assignee !== 'Unassigned') set.add(it.assignee);
+      if (it.assignee && !isUnassigned(it.assignee)) set.add(it.assignee);
     }
     for (const c of board?.comments ?? []) set.add(c.author);
     for (const p of presence) set.add(p.name);
     return [...set].sort();
   }, [board, presence]);
 
-  const { user, refreshUser } = useAuth();
-  const isDesktop = useMediaQuery('(min-width: 1024px)');
-  const [mobileTab, setMobileTab] = useState<MobileTab>('board');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [quotaExceeded, setQuotaExceeded] = useState(false);
-  const [showShare, setShowShare] = useState(false);
-  const [boardFilter, setBoardFilter] = useState<'all' | 'completed' | 'high'>('all');
-  const [focusSection, setFocusSection] = useState<SectionFocus | null>(null);
-  const focusNonce = useRef(0);
+  // The project's name for the breadcrumb. Someone with access to this board
+  // alone gets no project crumb, rather than a link that leads nowhere.
+  const projectId = board?.projectId ?? null;
+  useEffect(() => {
+    setProject(null);
+    if (!projectId) return;
+    let cancelled = false;
+    api.projects
+      .get(projectId)
+      .then(({ project }) => !cancelled && setProject({ id: project.id, name: project.name }))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
-  // A summary-bar chip either filters the board or expands/jumps to an AI-Brain
-  // section. On mobile we also switch to the relevant tab.
-  const handleChip = (key: SummaryKey) => {
-    const f = BOARD_FILTERS[key];
-    if (f) {
-      setBoardFilter((cur) => (cur === f && f !== 'all' ? 'all' : f));
-      if (!isDesktop) setMobileTab('board');
-    } else {
-      focusNonce.current += 1;
-      setFocusSection({ key, nonce: focusNonce.current });
-      if (!isDesktop) setMobileTab('brain');
+  // On a phone, an empty board opens on Minutes: that is where the transcript goes.
+  const landed = useRef(false);
+  useEffect(() => {
+    if (!board || landed.current) return;
+    landed.current = true;
+    if (canEdit && !board.summary && board.actionItems.length === 0) setMobileTab('minutes');
+  }, [board, canEdit]);
+
+  // On a phone the page scrolls as one document. Changing section brings the new
+  // one up to just under the pinned bars, rather than keeping the old offset.
+  const mainRef = useRef<HTMLElement>(null);
+  const tabBarRef = useRef<HTMLDivElement>(null);
+  const tabSeen = useRef(false);
+  useEffect(() => {
+    if (!tabSeen.current) {
+      tabSeen.current = true;
+      return;
     }
-  };
-  const activeChip: SummaryKey | null =
-    boardFilter === 'completed' ? 'done' : boardFilter === 'high' ? 'high' : null;
+    const main = mainRef.current;
+    if (!main || window.matchMedia('(min-width: 1024px)').matches) return;
+    const pinned = 56 + (tabBarRef.current?.offsetHeight ?? 0);
+    const top = main.getBoundingClientRect().top + window.scrollY - pinned;
+    if (window.scrollY > top) window.scrollTo({ top });
+  }, [mobileTab]);
 
-  // --- Team Comments: floating chat widget + unread badge ---
-  const [chatOpen, setChatOpen] = useState(false);
+  // --- Board discussion: unread count while it is closed ---
+  const [discussionOpen, setDiscussionOpen] = useState(false);
   const [seenComments, setSeenComments] = useState<number | null>(null);
   const commentsInited = useRef(false);
-
-  const commentsVisible = chatOpen;
   const commentCount = board?.comments?.length ?? 0;
 
-  // Comments present on first load count as already seen.
+  // Comments already there on first load count as seen.
   useEffect(() => {
     if (board && !commentsInited.current) {
       setSeenComments(board.comments?.length ?? 0);
@@ -124,45 +165,62 @@ function BoardView({ boardId }: { boardId: string }) {
     }
   }, [board]);
 
-  // Keep comments marked read while they're on screen.
   useEffect(() => {
-    if (commentsVisible) setSeenComments(commentCount);
-  }, [commentsVisible, commentCount]);
+    if (discussionOpen) setSeenComments(commentCount);
+  }, [discussionOpen, commentCount]);
 
-  const unreadComments =
-    commentsVisible || seenComments === null ? 0 : Math.max(0, commentCount - seenComments);
+  const unread = discussionOpen || seenComments === null ? 0 : Math.max(0, commentCount - seenComments);
 
-  // Returns true on success so the transcript box can clear and be ready for the
-  // next meeting; false on failure so the user keeps their text to retry.
+  usePageTitle(board?.name);
+
+  // Resolves true on success so the transcript box can clear; false keeps the
+  // text there for another try.
   const handleAnalyze = async (transcript: string): Promise<boolean> => {
     setIsAnalyzing(true);
-    setActionError(null);
+    setAnalyzeError(null);
     setQuotaExceeded(false);
     try {
       await analyze(transcript);
-      refreshUser(); // update remaining-transcription count
+      refreshUser(); // update the remaining-transcription count
+      setFilter('all');
+      setMobileTab('tasks');
       return true;
     } catch (err) {
-      if (err instanceof ApiError && err.status === 402) {
-        setQuotaExceeded(true);
-        setActionError(err.message);
-      } else {
-        setActionError(err instanceof ApiError ? err.message : 'Failed to analyze transcript');
-      }
+      setQuotaExceeded(err instanceof ApiError && err.status === 402);
+      setAnalyzeError(
+        err instanceof ApiError ? err.message : 'The transcript could not be read. Check your connection and try again.',
+      );
       return false;
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  const wrap = (fn: Promise<unknown>) =>
-    fn.catch((err) => setActionError(err instanceof ApiError ? err.message : 'Something went wrong'));
+  const wrap = (work: Promise<unknown>) =>
+    work.catch((err) =>
+      setActionError(err instanceof ApiError ? err.message : 'That change was not saved. Try again.'),
+    );
 
-  const handleAddTask = () =>
-    wrap(addItem({ title: 'New task', assignee: 'Unassigned', priority: 'Medium' }));
+  const handleAddTask = async () => {
+    setAddingTask(true);
+    setActionError(null);
+    try {
+      const created = await addItem({ title: 'New task', assignee: 'Unassigned', priority: 'Medium' });
+      setFilter('all');
+      setMobileTab('tasks');
+      if (created) {
+        setNewTaskId(created.id);
+        setSelectedId(created.id);
+      }
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'The task could not be added. Try again.');
+    } finally {
+      setAddingTask(false);
+    }
+  };
 
-  // Task-only exports formatted for direct import into Trello / Jira.
-  const downloadCSV = (platform: 'trello' | 'jira') => {
+  // Task-only exports, shaped for direct import into Trello or Jira.
+  const downloadTasks = (platform: 'trello' | 'jira') => {
     const items = board?.actionItems ?? [];
     if (items.length === 0) return;
     const rows =
@@ -172,7 +230,7 @@ function BoardView({ boardId }: { boardId: string }) {
     saveCsv(`${platform}-export.csv`, rows);
   };
 
-  // Full meeting-intelligence report: tasks, decisions, risks, and dependencies.
+  // The whole record: tasks, decisions, risks, blockers, dependencies, open questions.
   const downloadReport = () => {
     if (!board) return;
     const rows = ['Type,Detail,Assignee,Priority'];
@@ -188,259 +246,249 @@ function BoardView({ boardId }: { boardId: string }) {
     saveCsv(`${name}-report.csv`, rows);
   };
 
-  if (loading) {
-    return (
-      <CenteredMessage>
-        <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
-      </CenteredMessage>
-    );
-  }
-
+  if (loading) return <FullScreenLoader />;
   if (error || !board) {
-    return (
-      <CenteredMessage>
-        <AlertCircle className="w-8 h-8 text-red-500" />
-        <p className="text-sm font-medium text-slate-900 dark:text-slate-100 mt-3">
-          {error ?? 'Board not found'}
-        </p>
-        <Link to="/" className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:underline mt-2">
-          Back to your boards
-        </Link>
-      </CenteredMessage>
-    );
+    return <Missing message={error ?? 'It may have been deleted, or it has not been shared with you.'} />;
   }
 
-  const hasItems = board.actionItems.length > 0;
-  const hasReport = !!(
-    board.actionItems.length ||
-    board.keyDecisions?.length ||
-    board.risks?.length ||
-    board.dependencies?.length
+  const items = board.actionItems;
+  const hasItems = items.length > 0;
+  const hasRecord = Boolean(
+    hasItems ||
+      board.keyDecisions?.length ||
+      board.risks?.length ||
+      board.blockers?.length ||
+      board.dependencies?.length ||
+      board.openQuestions?.length,
   );
 
-  // --- Panels (rendered once; placed into the desktop grid or mobile tabs) ---
+  const jump = (key: SectionKey) => {
+    focusNonce.current += 1;
+    setFocusSection({ key, nonce: focusNonce.current });
+    setMobileTab('minutes');
+  };
+  const show = (next: TaskFilter) => {
+    setFilter((current) => (current === next ? 'all' : next));
+    setMobileTab('tasks');
+  };
 
-  const transcriptPanel = (
-    <div className="flex flex-col h-full min-h-0 gap-4">
-      <div className="flex-1 min-h-0">
-        <TranscriptInput
-          onAnalyze={handleAnalyze}
-          isAnalyzing={isAnalyzing}
-          analysis={board}
-          canEdit={canEdit}
-          focus={focusSection}
-        />
-      </div>
-      {actionError && (
-        <div
-          className={`shrink-0 p-4 rounded-xl border flex items-start gap-3 ${
-            quotaExceeded
-              ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-900/50'
-              : 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-900/50'
-          }`}
-        >
-          <AlertCircle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${quotaExceeded ? 'text-amber-500' : 'text-red-500'}`} />
-          <div className="min-w-0">
-            <p className={`text-sm ${quotaExceeded ? 'text-amber-800 dark:text-amber-300' : 'text-red-800 dark:text-red-400'}`}>
-              {actionError}
-            </p>
-            {quotaExceeded && (
-              <Link
-                to="/billing"
-                className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 bg-indigo-600 text-white rounded-md text-xs font-semibold hover:bg-indigo-700 transition-colors"
-              >
-                <Sparkles className="w-3.5 h-3.5" /> View plans
-              </Link>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  // The index line under the title: every count is a way in. Task counts filter
+  // the lanes; the rest jump to that part of the minutes.
+  const index: { n: number; label: string; onClick: () => void; pressed?: boolean; alert?: boolean }[] = [
+    { n: items.length, label: items.length === 1 ? 'task' : 'tasks', onClick: () => show('all') },
+    { n: items.filter((i) => i.status === 'completed').length, label: 'done', onClick: () => show('completed'), pressed: filter === 'completed' },
+    { n: items.filter((i) => i.priority === 'High').length, label: 'high priority', onClick: () => show('high'), pressed: filter === 'high' },
+    { n: board.blockers?.length ?? 0, label: (board.blockers?.length ?? 0) === 1 ? 'blocker' : 'blockers', onClick: () => jump('blockers'), alert: true },
+    { n: board.keyDecisions?.length ?? 0, label: (board.keyDecisions?.length ?? 0) === 1 ? 'decision' : 'decisions', onClick: () => jump('decisions') },
+    { n: board.risks?.length ?? 0, label: (board.risks?.length ?? 0) === 1 ? 'risk' : 'risks', onClick: () => jump('risks') },
+    { n: board.dependencies?.length ?? 0, label: (board.dependencies?.length ?? 0) === 1 ? 'dependency' : 'dependencies', onClick: () => jump('dependencies') },
+    { n: board.openQuestions?.length ?? 0, label: (board.openQuestions?.length ?? 0) === 1 ? 'open question' : 'open questions', onClick: () => jump('questions') },
+  ].filter((entry, i) => i === 0 || entry.n > 0);
 
-  const boardPanel = (
-    <div className="flex flex-col h-full min-h-0 rounded-xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
-      <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-between shrink-0">
-        <h2 className="font-bold text-slate-900 dark:text-slate-100 text-sm">Action Items Board</h2>
-        {canEdit && (
-          <button
-            onClick={handleAddTask}
-            className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 px-2 py-1 rounded-md transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" /> Add task
-          </button>
-        )}
-      </div>
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        <KanbanBoard
-          items={board.actionItems}
-          canEdit={canEdit}
-          filter={boardFilter}
-          people={people}
-          loadTaskComments={getTaskComments}
-          addTaskComment={addTaskComment}
-          onItemMove={(itemId, assignee) => wrap(moveItem(itemId, assignee))}
-          onItemUpdate={(itemId, updates: Partial<ActionItem>) => wrap(updateItem(itemId, updates))}
-          onItemDelete={(itemId) => wrap(deleteItem(itemId))}
-        />
-      </div>
-    </div>
-  );
+  const crumbs: Crumb[] = [
+    ...(project ? [{ label: project.name, to: `/project/${project.id}` }] : []),
+    { label: board.name },
+  ];
 
   return (
-    <div className="h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans overflow-hidden transition-colors">
-      <Header
-        center={
-          <div className="flex items-center gap-2 min-w-0 ml-1 pl-3 border-l border-slate-200 dark:border-slate-800">
-            <Link
-              to={board.projectId ? `/project/${board.projectId}` : '/'}
-              aria-label={board.projectId ? 'Back to project' : 'Back to dashboard'}
-              title={board.projectId ? 'Back to project' : 'Back to dashboard'}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 shrink-0"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </Link>
-            <span className="font-semibold text-slate-900 dark:text-slate-100 truncate max-w-[120px] sm:max-w-[200px] lg:max-w-[260px]">
-              {board.name}
-            </span>
-            {!canEdit && (
-              <span className="hidden sm:flex items-center gap-1 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
-                <Eye className="w-3 h-3" /> View only
-              </span>
-            )}
-            <PresenceBadge isConnected={isConnected} names={presence.map((p) => p.name)} />
-          </div>
-        }
-        actions={
-          <>
-            {board.role === 'OWNER' && (
-              <button
-                onClick={() => setShowShare(true)}
-                className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-              >
-                <Share2 className="w-4 h-4" />
-                <span className="hidden sm:inline">Share</span>
-              </button>
-            )}
-            <button
-              onClick={downloadReport}
-              disabled={!hasReport}
-              title="Export full report: tasks, decisions, risks & dependencies (CSV)"
-              className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <FileText className="w-4 h-4" />
-              <span className="hidden sm:inline">Report</span>
-            </button>
-            <button
-              onClick={() => downloadCSV('trello')}
-              disabled={!hasItems}
-              title="Export action items to Trello (CSV)"
-              className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-md border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <DownloadCloud className="w-4 h-4" /> Trello
-            </button>
-            <button
-              onClick={() => downloadCSV('jira')}
-              disabled={!hasItems}
-              title="Export action items to Jira (CSV)"
-              className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 bg-indigo-600 text-white rounded-md text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
-            >
-              <DownloadCloud className="w-4 h-4" />
-              <span className="hidden sm:inline">Export to Jira</span>
-            </button>
-          </>
-        }
-      />
+    <div className="flex min-h-dvh flex-col bg-paper lg:h-dvh lg:overflow-hidden">
+      <Header crumbs={crumbs} aside={<Presence connected={isConnected} names={presence.map((p) => p.name)} />} />
 
-      <main className="flex-1 min-h-0 p-4 md:p-6 flex flex-col overflow-hidden transition-colors">
-        {hasReport && <BoardSummaryBar board={board} onSelect={handleChip} activeKey={activeChip} />}
-        {isDesktop ? (
-          <div className="grid grid-cols-12 gap-6 flex-1 min-h-0">
-            <div className="col-span-3 min-h-0">{transcriptPanel}</div>
-            <div className="col-span-9 min-h-0">{boardPanel}</div>
-          </div>
-        ) : (
-          <div className="flex flex-col flex-1 min-h-0">
-            <div className="shrink-0 grid grid-cols-2 gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
-              <MobileTabButton active={mobileTab === 'brain'} onClick={() => setMobileTab('brain')} icon={<Brain className="w-4 h-4" />} label="AI Brain" />
-              <MobileTabButton active={mobileTab === 'board'} onClick={() => setMobileTab('board')} icon={<Columns3 className="w-4 h-4" />} label="Board" />
+      <div className="shrink-0 px-4 pt-5 md:px-8 md:pt-6">
+        <div className="double-rule pb-4">
+          <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+            <div className="min-w-0 flex-1 basis-72">
+              <h1 className="font-serif text-[1.75rem] leading-tight font-semibold tracking-[-0.01em] md:text-[2rem]">
+                {board.name}
+              </h1>
             </div>
-            <div className="flex-1 min-h-0 mt-4">
-              {/* All panels stay mounted (state preserved); only the active one shows. */}
-              <div className={mobileTab === 'brain' ? 'h-full' : 'hidden'}>{transcriptPanel}</div>
-              <div className={mobileTab === 'board' ? 'h-full' : 'hidden'}>{boardPanel}</div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              {board.role === 'OWNER' && (
+                <Button icon={<UserPlus className="h-4 w-4" aria-hidden />} onClick={() => setShowShare(true)} aria-label="Share">
+                  <span className="hidden sm:inline">Share</span>
+                </Button>
+              )}
+              <Button
+                icon={<MessageSquare className="h-4 w-4" aria-hidden />}
+                onClick={() => setDiscussionOpen(true)}
+                aria-label={unread > 0 ? `Discussion, ${unread} unread` : 'Discussion'}
+              >
+                <span className="hidden sm:inline">Discussion</span>
+                {unread > 0 ? (
+                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-red px-1 text-[0.625rem] leading-none font-semibold text-on-red tabular-nums">
+                    {unread > 9 ? '9+' : unread}
+                  </span>
+                ) : (
+                  commentCount > 0 && <span className="text-xs font-normal text-ink-3 tabular-nums">{commentCount}</span>
+                )}
+              </Button>
+              <Menu
+                button={(trigger) => (
+                  <Button {...trigger} icon={<Download className="h-4 w-4" aria-hidden />} disabled={!hasRecord} aria-label="Export">
+                    <span className="hidden sm:inline">Export</span>
+                    <ChevronDown className="hidden h-3.5 w-3.5 text-ink-3 sm:block" aria-hidden />
+                  </Button>
+                )}
+              >
+                {(close) => (
+                  <>
+                    <button type="button" role="menuitem" className={menuItemClass} onClick={() => { close(); downloadReport(); }}>
+                      Full report (CSV)
+                    </button>
+                    <button type="button" role="menuitem" className={menuItemClass} disabled={!hasItems} onClick={() => { close(); downloadTasks('trello'); }}>
+                      Tasks for Trello (CSV)
+                    </button>
+                    <button type="button" role="menuitem" className={menuItemClass} disabled={!hasItems} onClick={() => { close(); downloadTasks('jira'); }}>
+                      Tasks for Jira (CSV)
+                    </button>
+                  </>
+                )}
+              </Menu>
+              {canEdit && (
+                <Button
+                  variant={hasRecord ? 'primary' : 'secondary'}
+                  icon={<Plus className="h-4 w-4" aria-hidden />}
+                  loading={addingTask}
+                  onClick={handleAddTask}
+                >
+                  Add task
+                </Button>
+              )}
             </div>
           </div>
+          {hasRecord ? (
+            <p className="mt-1.5 -mx-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.8125rem] text-ink-2">
+              <span className="mx-1 text-ink-3">Filed {longDate(board.createdAt)}</span>
+              {!canEdit && <span className="mx-1 font-medium text-ink">View only</span>}
+              {index.map((entry) => (
+                <button
+                  key={entry.label}
+                  type="button"
+                  onClick={entry.onClick}
+                  aria-pressed={entry.pressed}
+                  className="shrink-0 rounded-[2px] px-1 py-1 transition-colors duration-150 hover:bg-wash hover:text-ink aria-pressed:bg-ink aria-pressed:text-on-ink"
+                >
+                  <span className={`font-semibold tabular-nums ${entry.pressed ? '' : entry.alert ? 'text-red' : 'text-ink'}`}>
+                    {entry.n}
+                  </span>{' '}
+                  {entry.label}
+                </button>
+              ))}
+            </p>
+          ) : (
+            <p className="mt-2 text-sm text-ink-2">
+              <span className="text-ink-3">Filed {longDate(board.createdAt)}.</span>{' '}
+              {canEdit ? 'No minutes yet. Paste the meeting transcript to fill this board.' : 'View only. No minutes yet.'}
+            </p>
+          )}
+        </div>
+
+        {actionError && (
+          <Notice className="mt-3">
+            {actionError}{' '}
+            <button type="button" className="link" onClick={() => setActionError(null)}>
+              Dismiss
+            </button>
+          </Notice>
         )}
+
+      </div>
+
+      {/* The section tabs stay within reach while a phone scrolls the page. */}
+      <div ref={tabBarRef} className="sticky top-14 z-20 bg-paper px-4 pt-3 md:px-8 lg:hidden">
+        <Tabs
+          label="Board sections"
+          value={mobileTab}
+          onChange={setMobileTab}
+          tabs={[
+            { value: 'tasks', label: 'Tasks' },
+            { value: 'minutes', label: 'Minutes' },
+          ]}
+        />
+      </div>
+
+      <main ref={mainRef} className="flex-1 lg:grid lg:min-h-0 lg:grid-cols-[19rem_minmax(0,1fr)] xl:grid-cols-[22rem_minmax(0,1fr)] 2xl:grid-cols-[26rem_minmax(0,1fr)]">
+        {/* Both stay mounted so a half-written transcript survives a tab switch. */}
+        <aside
+          aria-label="Minutes"
+          className={`relative pt-3 lg:block lg:h-full lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-rule ${mobileTab === 'minutes' ? 'block' : 'hidden'}`}
+        >
+          <h2 className="sr-only">Minutes</h2>
+          <Minutes
+            analysis={board}
+            canEdit={canEdit}
+            isAnalyzing={isAnalyzing}
+            onAnalyze={handleAnalyze}
+            focus={focusSection}
+            remaining={user && !user.usage.unlimited ? user.usage.remaining : null}
+            startWithSample={startWithSample}
+            error={
+              analyzeError && (
+                <Notice tone={quotaExceeded ? 'info' : 'error'}>
+                  {analyzeError}
+                  {quotaExceeded && (
+                    <>
+                      {' '}
+                      <Link to="/billing" className="link">
+                        See plans
+                      </Link>
+                    </>
+                  )}
+                </Notice>
+              )
+            }
+          />
+        </aside>
+
+        <section
+          aria-label="Tasks"
+          className={`min-w-0 flex-col lg:flex lg:h-full lg:min-h-0 ${mobileTab === 'tasks' ? 'flex' : 'hidden'}`}
+        >
+          <h2 className="sr-only">Tasks</h2>
+          <TaskLanes
+            items={items}
+            canEdit={canEdit}
+            filter={filter}
+            onFilterChange={setFilter}
+            selectedId={selectedId}
+            onSelect={(next) => {
+              setSelectedId(next);
+              if (next !== newTaskId) setNewTaskId(null);
+            }}
+            selectedIsNew={selectedId !== null && selectedId === newTaskId}
+            people={people}
+            loadTaskComments={getTaskComments}
+            addTaskComment={addTaskComment}
+            onItemMove={(itemId, assignee) => wrap(moveItem(itemId, assignee))}
+            onItemUpdate={(itemId, updates) => wrap(updateItem(itemId, updates))}
+            onItemDelete={(itemId) => wrap(deleteItem(itemId))}
+          />
+        </section>
       </main>
 
       {showShare && board.role === 'OWNER' && (
-        <ShareModal
-          kind="board"
-          id={board.id}
-          onClose={() => setShowShare(false)}
+        <ShareDialog kind="board" id={board.id} name={board.name} onClose={() => setShowShare(false)} />
+      )}
+
+      {discussionOpen && (
+        <Discussion
+          comments={board.comments ?? []}
+          canEdit={canEdit}
+          people={people}
+          onAdd={(text) => wrap(addComment(text))}
+          onClose={() => setDiscussionOpen(false)}
         />
       )}
 
-      {needsDisplayName && (
-        <SetNameModal
+      {needsDisplayName && !nameSkipped && (
+        <SetNameDialog
           boardName={board.name}
           defaultName={user?.name ?? ''}
           onSubmit={setDisplayName}
+          onSkip={() => setNameSkipped(true)}
         />
       )}
-
-      <ChatWidget
-        comments={board.comments ?? []}
-        canEdit={canEdit}
-        people={people}
-        onAddComment={(text) => wrap(addComment(text))}
-        unread={unreadComments}
-        open={chatOpen}
-        onOpenChange={setChatOpen}
-      />
-    </div>
-  );
-}
-
-function MobileTabButton({
-  active, onClick, icon, label, badge,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-  badge?: number;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center justify-center gap-1.5 py-2 rounded-md text-xs font-semibold transition-colors ${
-        active
-          ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
-          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-      }`}
-    >
-      {icon}
-      <span>{label}</span>
-      {badge ? (
-        <span className="text-[10px] font-bold bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-1.5 rounded-full">
-          {badge}
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
-function PresenceBadge({ isConnected, names }: { isConnected: boolean; names: string[] }) {
-  const count = Math.max(names.length, 1);
-  return (
-    <div
-      title={names.length ? `Online: ${names.join(', ')}` : undefined}
-      className="hidden sm:flex items-center gap-1.5 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-md text-xs font-medium text-slate-600 dark:text-slate-300 cursor-default"
-    >
-      <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-      {isConnected ? `${count} online` : 'Offline'}
     </div>
   );
 }

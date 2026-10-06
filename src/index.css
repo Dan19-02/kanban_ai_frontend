@@ -1,2 +1,271 @@
 @import "tailwindcss";
+
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* The minute book: bond-white paper, blue-black ink, pale blue ledger rules and
+   one red margin rule that doubles as the attention ink. The dark theme is the
+   carbon copy of the same page. */
+:root {
+  color-scheme: light;
+  --paper: #ffffff;
+  --wash: #f2f6fb;
+  --wash-2: #e3ebf6;
+  --rule: #dce6f2;
+  --rule-2: #b9c6da;
+  --edge: #8090ad;
+  --ink: #14213d;
+  --ink-2: #44506b;
+  --ink-3: #667189;
+  --red: #c8102e;
+  --red-wash: #fdeef0;
+  --on-ink: #ffffff;
+  --on-red: #ffffff;
+  --scrim: rgb(20 33 61 / 0.42);
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2344506b' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+
+  /* Binding colours for projects (the API stores the token name only). */
+  --pc-indigo: #2f3f9e;
+  --pc-emerald: #1f7a55;
+  --pc-amber: #b97a0a;
+  --pc-rose: #b83250;
+  --pc-sky: #2a7fb3;
+  --pc-violet: #6a46a8;
+  --pc-teal: #1b7f86;
+  --pc-slate: #5b667a;
+}
+
+.dark {
+  color-scheme: dark;
+  --paper: #0f1626;
+  --wash: #172036;
+  --wash-2: #202c49;
+  --rule: #232f4a;
+  --rule-2: #34425f;
+  --edge: #5d6c8c;
+  --ink: #e9eef7;
+  --ink-2: #b4bfd3;
+  --ink-3: #8c98b0;
+  --red: #ff6b7d;
+  --red-wash: #2b1622;
+  --on-ink: #0f1626;
+  --on-red: #0f1626;
+  --scrim: rgb(3 7 16 / 0.66);
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23b4bfd3' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+
+  --pc-indigo: #8492ea;
+  --pc-emerald: #4fb98d;
+  --pc-amber: #e0aa3e;
+  --pc-rose: #ea748d;
+  --pc-sky: #62b3e0;
+  --pc-violet: #a78de2;
+  --pc-teal: #55b9c0;
+  --pc-slate: #9aa5b8;
+}
+
+@theme inline {
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-paper: var(--paper);
+  --color-wash: var(--wash);
+  --color-wash-2: var(--wash-2);
+  --color-rule: var(--rule);
+  --color-rule-2: var(--rule-2);
+  --color-edge: var(--edge);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-red: var(--red);
+  --color-red-wash: var(--red-wash);
+  --color-on-ink: var(--on-ink);
+  --color-on-red: var(--on-red);
+  --color-scrim: var(--scrim);
+
+  --font-sans: "Public Sans Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: "Besley Variable", Georgia, "Times New Roman", serif;
+
+  --shadow-overlay: 0 18px 44px -14px rgb(8 15 34 / 0.32), 0 3px 10px -3px rgb(8 15 34 / 0.14);
+
+  --animate-rise: rise 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-slide: slide 200ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes slide {
+    from { opacity: 0; transform: translateX(14px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+}
+
+@layer base {
+  html {
+    background: var(--paper);
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-variant-numeric: lining-nums;
+    caret-color: var(--ink);
+  }
+
+  ::selection {
+    background: var(--ink);
+    color: var(--on-ink);
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* One focus treatment everywhere: a 2px ink ring that stands off the control. */
+  :focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline-offset: 0;
+  }
+
+  button,
+  [role="button"],
+  summary,
+  select,
+  label[for] {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  dialog {
+    color: inherit;
+  }
+
+  dialog::backdrop {
+    background: var(--scrim);
+  }
+
+  /* Lucide icons sit lighter than their default so they match the hairline rules. */
+  .lucide {
+    stroke-width: 1.75;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--rule-2) transparent;
+  }
+
+  /* Selects and search fields drop the browser's own arrow and clear button for ours. */
+  select {
+    appearance: none;
+    background-image: var(--chevron);
+    background-repeat: no-repeat;
+    background-position: right 0.625rem center;
+    background-size: 0.875rem;
+  }
+
+  input[type="search"]::-webkit-search-cancel-button,
+  input[type="search"]::-webkit-search-decoration {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    opacity: 0.6;
+  }
+
+  .dark input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 1ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Text links: a ruled underline that darkens to ink. */
+  .link {
+    font-weight: 500;
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-color: var(--rule-2);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    transition: text-decoration-color 150ms ease-out;
+  }
+
+  .link:hover {
+    text-decoration-color: var(--ink);
+  }
+
+  /* The double rule that closes a page head, as under a ledger total. */
+  .double-rule {
+    border-bottom: 3px double var(--ink);
+  }
+
+  /* A blank ruled page with its margin: used behind empty states. */
+  .ledger-blank {
+    --line: 2rem;
+    --margin: 2.75rem;
+    background-image:
+      linear-gradient(
+        to right,
+        transparent var(--margin),
+        var(--red) var(--margin),
+        var(--red) calc(var(--margin) + 1px),
+        transparent calc(var(--margin) + 1px)
+      ),
+      repeating-linear-gradient(
+        to bottom,
+        transparent 0,
+        transparent calc(var(--line) - 1px),
+        var(--rule) calc(var(--line) - 1px),
+        var(--rule) var(--line)
+      );
+  }
+
+  /* Ticking a task rules a line through its title. The line is drawn as a
+     background so its length can animate and it follows wrapped text. */
+  .strike {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-repeat: no-repeat;
+    background-position: 0 55%;
+    background-size: 0% 1px;
+    transition:
+      background-size 200ms cubic-bezier(0.16, 1, 0.3, 1),
+      color 160ms ease-out;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+
+  .strike[data-done="true"] {
+    background-size: 100% 1px;
+    color: var(--ink-3);
+  }
+}

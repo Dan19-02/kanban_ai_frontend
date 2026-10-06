@@ -27,7 +27,7 @@ export function renderMentions(text: string, people: string[] = []): React.React
     out.push(
       <span
         key={key++}
-        className="font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 rounded px-1"
+        className="rounded-[2px] bg-wash-2 px-1 font-medium text-ink"
       >
         @{m[1]}
       </span>,
