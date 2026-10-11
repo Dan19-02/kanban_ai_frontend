@@ -274,7 +274,8 @@ function BoardView({ boardId }: { boardId: string }) {
       />
     );
 
-  const tasksSection = (hasItems || hasAnalysis) && (
+  // Editors always get the task area, so a task can be added by hand before any transcript.
+  const tasksSection = (hasItems || hasAnalysis || canEdit) && (
     <section ref={tasksRef} aria-labelledby="tasks-heading" className="flex scroll-mt-20 flex-col gap-4 pt-2">
                 <div className="flex items-center justify-between gap-4">
                   <h2 id="tasks-heading" className="text-title font-semibold tracking-[-0.01em] text-ink">Tasks</h2>
