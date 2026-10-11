@@ -1,5 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { activeMentionQuery, applyMention } from '../lib/mentions';
+import { MenuItem, Monogram, cx, inputClass } from './ui';
 
 interface MentionInputProps {
   value: string;
@@ -16,6 +17,7 @@ export function MentionInput({
   value, onChange, onSubmit, people, placeholder, disabled, className,
 }: MentionInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const listId = useId();
   const [query, setQuery] = useState<string | null>(null);
   const [active, setActive] = useState(0);
 
@@ -61,25 +63,28 @@ export function MentionInput({
   };
 
   return (
-    <div className="relative flex-1 min-w-0">
+    <div className="relative min-w-0 flex-1">
       {open && (
-        <div className="absolute bottom-full mb-1 left-0 w-56 max-w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg overflow-hidden z-50">
+        <div
+          id={listId}
+          role="listbox"
+          aria-label="People to mention"
+          className="absolute bottom-full left-0 z-50 mb-1 w-56 max-w-full rounded-lg bg-paper p-1 shadow-pop"
+        >
           {suggestions.map((name, i) => (
-            <button
+            <MenuItem
               key={name}
-              type="button"
+              role="option"
+              aria-selected={i === active}
+              tabIndex={-1}
               onMouseDown={(e) => { e.preventDefault(); choose(name); }}
-              className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 ${
-                i === active
-                  ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
-                  : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50'
-              }`}
+              className={cx(i === active && 'bg-wash')}
             >
-              <span className="w-5 h-5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[9px] font-bold shrink-0">
-                {name.substring(0, 2).toUpperCase()}
+              <span className="flex min-w-0 items-center gap-2">
+                <Monogram name={name} size="sm" />
+                <span className="truncate">{name}</span>
               </span>
-              <span className="truncate">{name}</span>
-            </button>
+            </MenuItem>
           ))}
         </div>
       )}
@@ -94,7 +99,12 @@ export function MentionInput({
         onBlur={() => setTimeout(() => setQuery(null), 100)}
         disabled={disabled}
         placeholder={placeholder}
-        className={className}
+        aria-label={placeholder ?? 'Comment'}
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        role="combobox"
+        className={cx(inputClass, 'h-9', className)}
       />
     </div>
   );

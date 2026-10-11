@@ -87,7 +87,7 @@ async function request<T>(
     if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
       throw new ApiError(408, 'This took too long and timed out. Please try again.');
     }
-    throw new ApiError(0, 'Network error — please check your connection and try again.');
+    throw new ApiError(0, 'The server could not be reached. Check your connection and try again.');
   }
 
   const data = await res.json().catch(() => null);

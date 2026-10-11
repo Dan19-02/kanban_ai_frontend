@@ -1,5 +1,5 @@
 import React from 'react';
-import { KanbanSquare } from 'lucide-react';
+import { Field, Input, Monogram, Wordmark } from './ui';
 
 interface AuthShellProps {
   title: string;
@@ -8,45 +8,86 @@ interface AuthShellProps {
   footer: React.ReactNode;
 }
 
-/** Centered card layout shared by the login and register screens. */
+/** Two-column frame shared by the sign in and register screens. */
 export function AuthShell({ title, subtitle, children, footer }: AuthShellProps) {
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4 font-sans transition-colors">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col items-center gap-3 mb-8">
-          <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center shadow-sm">
-            <KanbanSquare className="w-7 h-7 text-white" />
+    <div className="min-h-screen bg-paper text-ink lg:grid lg:grid-cols-2">
+      <div className="flex min-h-screen flex-col px-5 py-5 lg:px-8">
+        <Wordmark />
+        <main className="flex flex-1 items-center py-10">
+          <div className="mx-auto w-full max-w-sm">
+            <h1 className="text-display font-semibold tracking-[-0.02em] text-ink">{title}</h1>
+            <p className="mt-2 text-body text-ink-2">{subtitle}</p>
+            <div className="mt-8">{children}</div>
+            <p className="mt-6 text-ui text-ink-2">{footer}</p>
           </div>
-          <h1 className="font-bold text-2xl tracking-tight text-slate-900 dark:text-slate-100">
-            TranscribeBoard
-          </h1>
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 sm:p-8">
-          <div className="mb-6">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">{title}</h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{subtitle}</p>
-          </div>
-          {children}
-        </div>
-
-        <p className="text-center text-sm text-slate-500 dark:text-slate-400 mt-6">{footer}</p>
+        </main>
       </div>
+
+      <aside
+        aria-hidden="true"
+        className="hidden min-h-screen items-center justify-center border-l border-line bg-wash px-10 py-10 lg:flex"
+      >
+        <BoardPreview />
+      </aside>
     </div>
   );
 }
 
 export function AuthField({
   label,
+  className,
   ...props
 }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
-    <label className="block">
-      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{label}</span>
-      <input
-        {...props}
-        className="mt-1.5 w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 disabled:opacity-60"
-      />
-    </label>
+    <Field label={label}>
+      {(p) => <Input {...props} {...p} className={className ?? 'h-10'} />}
+    </Field>
+  );
+}
+
+// ─── Preview ────────────────────────────────────────────────────────────────
+
+// Synthetic sample content. It shows the shape of a real board, nothing more.
+const PREVIEW_TASKS: { title: string; owner: string; person: string; due: string; mine?: boolean; blockedBy?: string }[] = [
+  { title: 'Confirm the pricing page copy', owner: 'You', person: 'Dana Whitfield', due: '14 Oct', mine: true },
+  { title: 'Legal approval of the wording', owner: 'Marcus Lee', person: 'Marcus Lee', due: '13 Oct' },
+  { title: 'Publish the release notes', owner: 'Priya Nair', person: 'Priya Nair', due: '15 Oct', blockedBy: 'Legal approval of the wording' },
+  { title: 'Brief the support team', owner: 'Aisha Khan', person: 'Aisha Khan', due: '16 Oct' },
+];
+
+/** A static picture of what the product produces, drawn with the real primitives. */
+function BoardPreview() {
+  return (
+    <div className="w-full max-w-[30rem]">
+      <p className="text-title font-semibold tracking-[-0.01em] text-ink">
+        Paste a transcript. Get a board where every task has an owner.
+      </p>
+
+      <div className="mt-8 rounded-lg border border-line bg-paper px-5 pb-2 pt-5">
+        <p className="text-lead font-semibold tracking-[-0.01em] text-ink">Launch readiness review</p>
+        <p className="mt-1.5 text-ui leading-relaxed text-ink-2">
+          Launch moves to 21 Oct so legal can approve the release wording.
+          Pricing copy and the support brief are due this week.
+        </p>
+
+        <ul className="mt-4 border-t border-line">
+          {PREVIEW_TASKS.map((t) => (
+            <li key={t.title} className="flex items-start gap-3 border-b border-line py-3 last:border-b-0">
+              <span className="mt-px h-[18px] w-[18px] shrink-0 rounded-[5px] border border-line-strong bg-paper" />
+              <div className="min-w-0 flex-1">
+                <p className="text-ui font-medium text-ink">{t.title}</p>
+                {t.blockedBy && <p className="mt-0.5 text-meta text-danger">Blocked by: {t.blockedBy}</p>}
+                <p className="mt-1 flex items-center gap-1.5 text-meta text-ink-2">
+                  <Monogram name={t.person} mine={t.mine} size="sm" />
+                  <span className={t.mine ? 'font-medium text-ink' : undefined}>{t.owner}</span>
+                </p>
+              </div>
+              <span className="tnum shrink-0 text-meta text-ink-3">{t.due}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
   );
 }
