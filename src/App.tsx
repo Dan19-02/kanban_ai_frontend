@@ -1,6 +1,6 @@
 import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from './components/ui';
 import { useAuth } from './auth/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
@@ -15,8 +15,8 @@ const BillingPage = lazy(() => import('./pages/BillingPage').then((m) => ({ defa
 
 function FullScreenLoader() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-      <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+    <div className="flex min-h-screen items-center justify-center bg-paper text-ink-3">
+      <Spinner className="h-4 w-4" />
     </div>
   );
 }

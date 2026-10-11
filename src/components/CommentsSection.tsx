@@ -1,47 +1,28 @@
-import React, { useState } from 'react';
-import { Send, MessageSquare, ChevronDown } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Comment } from '../types';
 import { MentionInput } from './MentionInput';
 import { renderMentions } from '../lib/mentions';
+import { Button, Monogram, cx, inputClass } from './ui';
 
 interface CommentsSectionProps {
   comments: Comment[];
   canEdit: boolean;
   onAddComment: (text: string) => void;
-  /** When provided, shows a collapse button in the header (desktop). */
-  onCollapse?: () => void;
-  /** Names available for @mention autocomplete + highlighting. */
+  /** Names available for @mention autocomplete. */
   people?: string[];
+  /** Names the signed-in person goes by on this board. */
+  me?: string[];
 }
 
-const AVATAR_COLORS = [
-  'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
-  'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
-  'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300',
-  'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300',
-  'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300',
-  'bg-cyan-100 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300',
-];
-
-/** Stable color + initials per author so each person is visually distinct. */
-function authorColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
-}
-
-function initials(name: string): string {
-  return name
-    .trim()
-    .split(/\s+/)
-    .map((n) => n[0])
-    .join('')
-    .substring(0, 2)
-    .toUpperCase();
-}
-
-export function CommentsSection({ comments, canEdit, onAddComment, onCollapse, people = [] }: CommentsSectionProps) {
+/** The board's discussion thread. Sits in the side column, not in a bubble. */
+export function CommentsSection({ comments, canEdit, onAddComment, people = [], me }: CommentsSectionProps) {
   const [text, setText] = useState('');
+  const end = useRef<HTMLDivElement>(null);
+
+  // Keep the newest comment in view as the thread grows.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: 'nearest' });
+  }, [comments.length]);
 
   const submit = () => {
     const trimmed = text.trim();
@@ -49,84 +30,61 @@ export function CommentsSection({ comments, canEdit, onAddComment, onCollapse, p
     onAddComment(trimmed);
     setText('');
   };
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    submit();
-  };
 
   return (
-    <div className="flex flex-col h-full w-full bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden transition-colors">
-      <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-between shrink-0">
-        <h2 className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2 text-sm">
-          <MessageSquare className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-          Team Comments
-        </h2>
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-medium bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full">
-            {comments?.length || 0}
-          </span>
-          {onCollapse && (
-            <button
-              onClick={onCollapse}
-              title="Minimize comments"
-              aria-label="Minimize comments"
-              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-md transition-colors"
-            >
-              <ChevronDown className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="flex-1 p-4 flex flex-col gap-4 overflow-y-auto bg-white dark:bg-slate-900 min-h-0 transition-colors">
-        {(!comments || comments.length === 0) ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 gap-2 min-h-[100px]">
-            <MessageSquare className="w-8 h-8 opacity-20" />
-            <p className="text-sm font-medium">No comments yet</p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {comments.map(c => (
-              <div key={c.id} className="flex gap-2.5">
-                <div
-                  className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5 ${authorColor(c.author)}`}
-                  title={c.author}
-                >
-                  {initials(c.author)}
-                </div>
-                <div className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2.5 rounded-lg rounded-tl-sm transition-colors">
-                  <div className="flex justify-between items-baseline gap-2">
-                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300 truncate">{c.author}</span>
-                    <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0">
+    <div className="flex flex-col gap-4">
+      {comments.length === 0 ? (
+        <p className="text-ui text-ink-2">
+          No comments yet. {canEdit ? 'Ask a question or flag something for the team.' : ''}
+        </p>
+      ) : (
+        <ul className="flex max-h-[55vh] flex-col gap-4 overflow-y-auto pr-1">
+          {comments.map((c) => {
+            const mine = !!me?.includes(c.author);
+            return (
+              <li key={c.id} className="flex gap-2.5">
+                <Monogram name={c.author} mine={mine} />
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-baseline gap-2 text-ui">
+                    <span className="truncate font-medium text-ink">{c.author}</span>
+                    <span className="tnum shrink-0 text-meta text-ink-3">
                       {new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
-                  </div>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-wrap break-words mt-0.5">{renderMentions(c.text, people)}</p>
+                  </p>
+                  <p className="mt-0.5 whitespace-pre-wrap break-words text-ui leading-relaxed text-ink-2">
+                    {renderMentions(c.text, people)}
+                  </p>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              </li>
+            );
+          })}
+          <div ref={end} />
+        </ul>
+      )}
 
-      <form onSubmit={handleSubmit} className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex items-center gap-2 shrink-0 transition-colors">
-        <MentionInput
-          value={text}
-          onChange={setText}
-          onSubmit={submit}
-          people={people}
-          disabled={!canEdit}
-          placeholder={canEdit ? 'Type a comment… use @ to mention' : 'View-only access'}
-          className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 disabled:opacity-60 disabled:cursor-not-allowed"
-        />
-        <button
-          type="submit"
-          disabled={!canEdit || !text.trim()}
-          className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+      {canEdit ? (
+        <form
+          onSubmit={(e: React.FormEvent) => {
+            e.preventDefault();
+            submit();
+          }}
+          className="flex flex-col gap-2"
         >
-          <Send className="w-4 h-4" />
-        </button>
-      </form>
+          <MentionInput
+            value={text}
+            onChange={setText}
+            onSubmit={submit}
+            people={people}
+            placeholder="Write a comment. Type @ to mention"
+            className={cx(inputClass, 'h-9')}
+          />
+          <Button type="submit" variant="secondary" size="sm" className="self-end" disabled={!text.trim()}>
+            Send
+          </Button>
+        </form>
+      ) : (
+        <p className="text-meta text-ink-3">You can read this board but not comment on it.</p>
+      )}
     </div>
   );
 }

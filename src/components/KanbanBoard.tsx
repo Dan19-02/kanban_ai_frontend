@@ -1,13 +1,15 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { ActionItem, Comment } from '../types';
-import {
-  GripVertical, X, Search, Calendar, Trash2, Lock, MessageSquare, Loader2, Send, FileText,
-} from 'lucide-react';
 import { motion } from 'motion/react';
+import { ActionItem, Comment } from '../types';
 import { MentionInput } from './MentionInput';
 import { renderMentions } from '../lib/mentions';
+import { GripIcon, SearchIcon } from './icons';
+import {
+  Button, Checkbox, Dialog, Empty, Monogram, Segmented, Spinner, Tabs, cx, inputClass,
+} from './ui';
 
 type GroupBy = 'assignee' | 'priority' | 'dueDate';
+export type View = 'list' | 'board';
 type ModalTab = 'details' | 'activity';
 
 interface KanbanBoardProps {
@@ -17,6 +19,11 @@ interface KanbanBoardProps {
   filter?: 'all' | 'completed' | 'high';
   /** Names for @mention autocomplete in task activity. */
   people?: string[];
+  /** Names the signed-in person goes by on this board. Their tasks get the highlighter. */
+  me?: string[];
+  /** List or board. The page owns it so it can give the board view more room. */
+  view: View;
+  onViewChange: (view: View) => void;
   /** Fetch a task's comments (enables the Activity tab when provided). */
   loadTaskComments?: (itemId: string) => Promise<Comment[]>;
   /** Post a comment to a task; resolves to the updated thread. */
@@ -24,6 +31,28 @@ interface KanbanBoardProps {
   onItemMove: (itemId: string, newAssignee: string) => void;
   onItemUpdate: (itemId: string, updates: Partial<ActionItem>) => void;
   onItemDelete: (itemId: string) => void;
+}
+
+// "2026-10-15" becomes "15 Oct". Anything unparseable is shown as stored.
+export function formatDue(dueDate: string): string {
+  const d = new Date(`${dueDate}T00:00:00`);
+  if (isNaN(d.getTime())) return dueDate;
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+function isOverdue(item: ActionItem): boolean {
+  if (!item.dueDate || item.status === 'completed') return false;
+  const d = new Date(`${item.dueDate}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return !isNaN(d.getTime()) && d.getTime() < today.getTime();
+}
+
+function priorityClass(priority?: string): string {
+  const p = (priority || '').toLowerCase();
+  if (p.includes('high') || p.includes('urgent')) return 'font-medium text-danger';
+  if (p.includes('medium')) return 'text-ink-2';
+  return 'text-ink-3';
 }
 
 const GROUPINGS: { key: GroupBy; label: string }[] = [
@@ -50,12 +79,13 @@ function dueBucket(dueDate?: string): { key: string; label: string } {
 const DUE_ORDER = ['overdue', 'today', 'week', 'later', 'none'] as const;
 
 export function KanbanBoard({
-  items, canEdit, filter = 'all', people, loadTaskComments, addTaskComment,
+  items, canEdit, filter = 'all', people, me, view, onViewChange, loadTaskComments, addTaskComment,
   onItemMove, onItemUpdate, onItemDelete,
 }: KanbanBoardProps) {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [groupBy, setGroupBy] = useState<GroupBy>('assignee');
+  const isMine = (name: string) => !!me?.includes(name);
 
   // Task detail modal: tabs + per-task comment thread (the "Activity" tab).
   const [modalTab, setModalTab] = useState<ModalTab>('details');
@@ -94,13 +124,6 @@ export function KanbanBoard({
     }
   };
 
-  const tabCls = (t: ModalTab) =>
-    `flex items-center gap-1.5 px-3 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
-      modalTab === t
-        ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-        : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-    }`;
-
   const handleDragStart = (e: React.DragEvent, id: string) => {
     e.dataTransfer.setData('text/plain', id);
   };
@@ -123,25 +146,6 @@ export function KanbanBoard({
     } else if (groupBy === 'priority' && columnKey !== 'None') {
       onItemUpdate(itemId, { priority: columnKey as 'High' | 'Medium' | 'Low' });
     }
-  };
-
-  // Get initials for avatar
-  const getInitials = (name: string) => {
-    if (name === 'Unassigned') return '?';
-    return name
-      .split(' ')
-      .map((n) => n[0])
-      .join('')
-      .substring(0, 2)
-      .toUpperCase();
-  };
-
-  const getPriorityColor = (priority?: string) => {
-    const p = (priority || '').toLowerCase();
-    if (p.includes('high') || p.includes('urgent')) return 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300';
-    if (p.includes('medium')) return 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300';
-    if (p.includes('low')) return 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300';
-    return 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300';
   };
 
   const filteredItems = useMemo(() => {
@@ -185,265 +189,270 @@ export function KanbanBoard({
     return names.map((key) => ({ key, label: key, items: cardsWhere((i) => i.assignee === key) }));
   }, [filteredItems, groupBy]);
 
-  const avatarColors = [
-    'bg-blue-100 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800/50 text-blue-700 dark:text-blue-300',
-    'bg-emerald-100 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300',
-    'bg-purple-100 dark:bg-purple-900/30 border-purple-200 dark:border-purple-800/50 text-purple-700 dark:text-purple-300',
-    'bg-amber-100 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800/50 text-amber-700 dark:text-amber-300',
-  ];
-
   const draggable = canEdit && groupBy !== 'dueDate';
 
+  const openCount = (list: ActionItem[]) => list.filter((i) => i.status !== 'completed').length;
+  const groupNote = (list: ActionItem[]) =>
+    list.length === 0 ? 'none' : openCount(list) === 0 ? 'all done' : `${openCount(list)} of ${list.length} open`;
+
+  const groupHeading = (label: string) => (
+    <span className="flex min-w-0 items-center gap-2">
+      {groupBy === 'assignee' && <Monogram name={label} mine={isMine(label)} />}
+      <span className={cx('truncate', groupBy === 'assignee' && isMine(label) && 'mark')}>{label}</span>
+    </span>
+  );
+
+  // The small facts under or beside a task title, shared by both views.
+  const blockedLine = (item: ActionItem) =>
+    item.status !== 'completed' && item.blockedBy && item.blockedBy.length > 0 ? (
+      <p className="mt-1 text-meta text-danger">Blocked by: {item.blockedBy.join(', ')}</p>
+    ) : null;
+
+  const dueText = (item: ActionItem) =>
+    item.dueDate ? (
+      <span className={cx('tnum', isOverdue(item) ? 'font-medium text-danger' : 'text-ink-3')}>
+        {isOverdue(item) ? `Overdue, ${formatDue(item.dueDate)}` : formatDue(item.dueDate)}
+      </span>
+    ) : null;
+
+  const titleButton = (item: ActionItem) => (
+    <button
+      type="button"
+      onClick={() => setSelectedItemId(item.id)}
+      className={cx(
+        'text-left text-body leading-snug decoration-line-strong underline-offset-4 hover:underline',
+        item.status === 'completed' ? 'text-ink-3 line-through' : 'text-ink',
+      )}
+    >
+      {item.title}
+    </button>
+  );
+
+  const dragProps = (item: ActionItem) => ({
+    layoutId: item.id,
+    draggable,
+    // motion types onDragStart as a pan-gesture handler, but with `draggable`
+    // the browser fires a native HTML5 DragEvent at runtime.
+    onDragStart: (e: unknown) => {
+      if (draggable) handleDragStart(e as React.DragEvent, item.id);
+    },
+  });
+
   return (
-    <div className="flex flex-col h-full w-full bg-slate-50 dark:bg-slate-900 relative transition-colors">
-      <div className="p-3 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900 shadow-sm z-10 sticky top-0 transition-colors flex flex-col gap-2">
-        <div className="relative w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-slate-500" />
+    <div className="flex w-full flex-col gap-5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="relative min-w-[12rem] flex-1">
+          <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
           <input
-            type="text"
-            placeholder="Search by title or assignee..."
+            type="search"
+            aria-label="Search tasks"
+            placeholder="Search tasks or people"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
+            className={cx(inputClass, 'h-8 pl-8')}
           />
         </div>
-        <div className="flex items-center gap-1.5 overflow-x-auto">
-          <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500 mr-0.5 shrink-0">Group by</span>
-          {GROUPINGS.map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setGroupBy(key)}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors shrink-0 ${
-                groupBy === key
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <Segmented label="Group tasks by" value={groupBy} onChange={setGroupBy} options={GROUPINGS.map((g) => ({ value: g.key, label: g.label }))} />
+        <Segmented label="View" value={view} onChange={onViewChange} options={[{ value: 'list', label: 'List' }, { value: 'board', label: 'Board' }]} />
       </div>
 
       {items.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800/50 min-h-[400px] m-4 transition-colors">
-          <p className="text-slate-500 dark:text-slate-400 font-medium text-sm">No action items to display.</p>
-        </div>
-      ) : columns.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800/50 min-h-[400px] m-4 transition-colors">
-          <p className="text-slate-500 dark:text-slate-400 font-medium text-sm">No items match your search or filter.</p>
+        <Empty title="No tasks yet">Paste a transcript above, or add a task by hand.</Empty>
+      ) : columns.length === 0 || filteredItems.length === 0 ? (
+        <Empty title="Nothing matches">Try a different search, or clear the filter.</Empty>
+      ) : view === 'list' ? (
+        <div className="flex flex-col gap-9">
+          {columns.map((column) => (
+            <section key={column.key} aria-label={column.label} onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, column.key)}>
+              <header className="flex items-center justify-between gap-3 border-b border-line-strong pb-2">
+                <h3 className="min-w-0 text-body font-semibold text-ink">{groupHeading(column.label)}</h3>
+                <span className="tnum shrink-0 text-meta text-ink-3">{groupNote(column.items)}</span>
+              </header>
+              {column.items.length === 0 ? (
+                <p className="py-3 text-ui text-ink-3">Nothing here.</p>
+              ) : (
+                <ul>
+                  {column.items.map((item) => (
+                    <motion.li
+                      key={item.id}
+                      {...dragProps(item)}
+                      className={cx('group relative flex items-start gap-3 border-b border-line py-3', draggable && 'cursor-grab active:cursor-grabbing')}
+                    >
+                      {draggable && (
+                        <GripIcon className="absolute -left-5 top-3.5 text-ink-3 opacity-0 transition-opacity group-hover:opacity-100 max-lg:hidden" />
+                      )}
+                      <span className="mt-[3px]">
+                        <Checkbox
+                          checked={item.status === 'completed'}
+                          disabled={!canEdit}
+                          onChange={(done) => onItemUpdate(item.id, { status: done ? 'completed' : 'pending' })}
+                          label={`Mark "${item.title}" as done`}
+                        />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        {titleButton(item)}
+                        {/* In non-person groupings, show who owns the task. */}
+                        {groupBy !== 'assignee' && (
+                          <p className="mt-0.5 text-meta text-ink-2">
+                            <span className={cx(isMine(item.assignee) && 'mark')}>{item.assignee}</span>
+                          </p>
+                        )}
+                        {blockedLine(item)}
+                      </div>
+                      {item.status !== 'completed' && item.priority && (
+                        <span className={cx('mt-0.5 w-14 shrink-0 text-meta max-sm:hidden', priorityClass(item.priority))}>
+                          {item.priority}
+                        </span>
+                      )}
+                      <span className="mt-0.5 min-w-[3.5rem] shrink-0 text-right text-meta">{dueText(item)}</span>
+                    </motion.li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          ))}
         </div>
       ) : (
-        <div className="flex gap-6 overflow-x-auto overflow-y-hidden items-start w-full flex-1 p-4">
-          {columns.map((column, colIndex) => (
-            <div
+        <div className="-mx-5 flex items-start gap-3 overflow-x-auto px-5 pb-4 lg:-mx-8 lg:px-8">
+          {columns.map((column) => (
+            <section
               key={column.key}
-              className="flex-shrink-0 w-[300px] flex flex-col h-full min-h-0"
+              aria-label={column.label}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, column.key)}
+              className="flex min-w-[14rem] flex-1 basis-0 flex-col rounded-lg bg-wash p-2"
             >
-              <div className="flex items-center gap-3 mb-4 shrink-0">
-                {groupBy === 'assignee' ? (
-                  <>
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center border ${avatarColors[colIndex % avatarColors.length]}`}>
-                      <span className="font-bold text-sm">{getInitials(column.label)}</span>
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-slate-900 dark:text-slate-100 leading-tight">{column.label}</h3>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-tighter">
-                        {column.items.length} {column.items.length === 1 ? 'task' : 'tasks'}
-                      </p>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`text-[11px] font-bold px-2 py-1 rounded uppercase ${
-                        groupBy === 'priority'
-                          ? getPriorityColor(column.key === 'None' ? undefined : column.key)
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                      }`}
-                    >
-                      {column.label}
-                    </span>
-                    <span className="text-[11px] text-slate-500 dark:text-slate-400 font-bold">{column.items.length}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex-1 flex flex-col gap-3 overflow-y-auto pb-8 min-h-0 pr-1">
+              <header className="flex items-center justify-between gap-2 px-1.5 pb-2 pt-1">
+                <h3 className="min-w-0 text-ui font-semibold text-ink">{groupHeading(column.label)}</h3>
+                <span className="tnum shrink-0 text-meta text-ink-3">{groupNote(column.items)}</span>
+              </header>
+              <ul className="flex min-h-[2.5rem] flex-col gap-1.5">
                 {column.items.map((item) => (
-                  <motion.div
-                    layoutId={item.id}
+                  <motion.li
                     key={item.id}
-                    draggable={draggable}
-                    // motion.div types onDragStart as a pan-gesture handler, but with
-                    // `draggable` the browser fires a native HTML5 DragEvent at runtime.
-                    onDragStart={(e) => {
-                      if (draggable) handleDragStart(e as unknown as React.DragEvent, item.id);
-                    }}
-                    className={`bg-white dark:bg-slate-800 flex flex-col gap-2 p-4 rounded-xl shadow-sm border ${item.status === 'completed' ? 'border-transparent opacity-60 bg-slate-50 dark:bg-slate-800/50' : 'border-slate-200 dark:border-slate-700'} ${draggable ? 'cursor-grab active:cursor-grabbing' : ''} hover:border-slate-300 dark:hover:border-slate-600 transition-all group relative shrink-0`}
+                    {...dragProps(item)}
+                    className={cx(
+                      'rounded-md border border-line bg-paper p-3 transition-colors hover:border-line-strong',
+                      draggable && 'cursor-grab active:cursor-grabbing',
+                    )}
                   >
-                    {draggable && (
-                      <div className="absolute top-1/2 -translate-y-1/2 left-1 opacity-0 group-hover:opacity-30 transition-opacity">
-                        <GripVertical className="w-4 h-4 text-slate-600 dark:text-slate-400" />
-                      </div>
-                    )}
-                    <div className="flex justify-between items-start">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${getPriorityColor(item.priority)}`}>
-                        {item.priority || 'Task'}
+                    <div className="flex items-start gap-2.5">
+                      <span className="mt-[3px]">
+                        <Checkbox
+                          checked={item.status === 'completed'}
+                          disabled={!canEdit}
+                          onChange={(done) => onItemUpdate(item.id, { status: done ? 'completed' : 'pending' })}
+                          label={`Mark "${item.title}" as done`}
+                        />
                       </span>
-                      <input
-                        type="checkbox"
-                        checked={item.status === 'completed'}
-                        disabled={!canEdit}
-                        onChange={(e) => onItemUpdate(item.id, { status: e.target.checked ? 'completed' : 'pending' })}
-                        className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                        title="Toggle completed"
-                      />
+                      <div className="min-w-0 flex-1">
+                        {titleButton(item)}
+                        {blockedLine(item)}
+                        {(groupBy !== 'assignee' || item.priority || item.dueDate) && item.status !== 'completed' && (
+                          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-meta">
+                            {groupBy !== 'assignee' && (
+                              <span className={cx('text-ink-2', isMine(item.assignee) && 'mark')}>{item.assignee}</span>
+                            )}
+                            {item.priority && <span className={priorityClass(item.priority)}>{item.priority}</span>}
+                            {dueText(item)}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    {/* In non-person groupings, show who owns the card. */}
-                    {groupBy !== 'assignee' && (
-                      <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                        <span className="w-4 h-4 rounded-full flex items-center justify-center bg-slate-100 dark:bg-slate-700 text-[8px] font-bold shrink-0">
-                          {getInitials(item.assignee)}
-                        </span>
-                        <span className="truncate">{item.assignee}</span>
-                      </div>
-                    )}
-                    <p
-                      className={`mt-1 text-sm font-medium ${item.status === 'completed' ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-800 dark:text-slate-100'} cursor-pointer hover:underline`}
-                      onClick={(e) => { e.stopPropagation(); setSelectedItemId(item.id); }}
-                    >
-                      {item.title}
-                    </p>
-                    {item.dueDate && (
-                      <div className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-400 dark:text-slate-500 font-medium">
-                        <Calendar className="w-3 h-3" />
-                        <span>Due: {item.dueDate}</span>
-                      </div>
-                    )}
-                    {item.blockedBy && item.blockedBy.length > 0 && (
-                      <div className="flex items-start gap-1.5 mt-1 text-[11px] text-red-500 dark:text-red-400 font-medium">
-                        <Lock className="w-3 h-3 mt-0.5 shrink-0" />
-                        <span className="line-clamp-2">Blocked by: {item.blockedBy.join(', ')}</span>
-                      </div>
-                    )}
-                  </motion.div>
+                  </motion.li>
                 ))}
-              </div>
-            </div>
+              </ul>
+            </section>
           ))}
         </div>
       )}
 
       {selectedItem && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-hidden">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden border border-slate-200 dark:border-slate-800 flex flex-col transition-colors"
-            style={{ maxHeight: 'calc(100vh - 40px)' }}
-          >
-            <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 shrink-0">
-              <div className="flex items-center gap-3">
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${getPriorityColor(selectedItem.priority)}`}>
-                  {selectedItem.priority || 'Task'}
-                </span>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={selectedItem.status === 'completed'}
-                    disabled={!canEdit}
-                    onChange={(e) => onItemUpdate(selectedItem.id, { status: e.target.checked ? 'completed' : 'pending' })}
-                    className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
-                  />
-                  <span className="text-xs font-bold text-slate-600 dark:text-slate-400 tracking-wide uppercase">
-                    {selectedItem.status === 'completed' ? 'Completed' : 'Mark Complete'}
-                  </span>
-                </label>
-              </div>
-              <button
-                onClick={() => setSelectedItemId(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors shrink-0"
-              >
-                <X className="w-5 h-5" />
-              </button>
+        <Dialog
+          title={canEdit ? 'Task' : selectedItem.title}
+          width="max-w-lg"
+          onClose={() => setSelectedItemId(null)}
+          footer={
+            <>
+              {canEdit && (
+                <Button
+                  variant="danger"
+                  className="mr-auto"
+                  onClick={() => {
+                    onItemDelete(selectedItem.id);
+                    setSelectedItemId(null);
+                  }}
+                >
+                  Delete task
+                </Button>
+              )}
+              <Button variant="primary" onClick={() => setSelectedItemId(null)}>Done</Button>
+            </>
+          }
+        >
+          {loadTaskComments && (
+            <div className="mb-4">
+              <Tabs
+                label="Task"
+                value={modalTab}
+                onChange={setModalTab}
+                tabs={[
+                  { value: 'details', label: 'Details' },
+                  { value: 'activity', label: 'Activity', count: taskComments?.length || undefined },
+                ]}
+              />
             </div>
+          )}
 
-            {loadTaskComments && (
-              <div className="flex items-center gap-1 px-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
-                <button onClick={() => setModalTab('details')} className={tabCls('details')}>
-                  <FileText className="w-3.5 h-3.5" /> Details
-                </button>
-                <button onClick={() => setModalTab('activity')} className={tabCls('activity')}>
-                  <MessageSquare className="w-3.5 h-3.5" /> Activity
-                  {taskComments && taskComments.length > 0 ? ` (${taskComments.length})` : ''}
-                </button>
-              </div>
-            )}
-
-            {modalTab === 'activity' ? (
-              <div className="p-5 overflow-y-auto flex flex-col gap-4 min-h-[240px]">
-                {taskComments === null ? (
-                  <div className="flex justify-center py-10">
-                    <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
-                  </div>
-                ) : taskComments.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-10 text-slate-400 dark:text-slate-500 gap-2 text-center">
-                    <MessageSquare className="w-8 h-8 opacity-20" />
-                    <p className="text-sm font-medium">No activity yet</p>
-                    <p className="text-xs">Discuss this task with your team.</p>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    {taskComments.map((c) => (
-                      <div key={c.id} className="flex gap-2.5">
-                        <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
-                          {c.author.substring(0, 2).toUpperCase()}
-                        </div>
-                        <div className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-2.5 rounded-lg rounded-tl-sm">
-                          <div className="flex justify-between items-baseline gap-2">
-                            <span className="text-xs font-bold text-slate-700 dark:text-slate-300 truncate">{c.author}</span>
-                            <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0">
-                              {new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                          <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-wrap break-words mt-0.5">
-                            {renderMentions(c.text, people ?? [])}
-                          </p>
-                        </div>
+          {modalTab === 'activity' ? (
+            <div className="flex min-h-[15rem] flex-col gap-4 pb-2">
+              {taskComments === null ? (
+                <div className="flex justify-center py-10 text-ink-3"><Spinner className="h-4 w-4" /></div>
+              ) : taskComments.length === 0 ? (
+                <p className="py-6 text-ui text-ink-2">No comments on this task yet.</p>
+              ) : (
+                <ul className="flex flex-col gap-4">
+                  {taskComments.map((c) => (
+                    <li key={c.id} className="flex gap-2.5">
+                      <Monogram name={c.author} mine={isMine(c.author)} />
+                      <div className="min-w-0 flex-1">
+                        <p className="flex items-baseline gap-2 text-ui">
+                          <span className="font-medium text-ink">{c.author}</span>
+                          <span className="tnum text-meta text-ink-3">
+                            {new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </p>
+                        <p className="mt-0.5 whitespace-pre-wrap break-words text-ui leading-relaxed text-ink-2">
+                          {renderMentions(c.text, people ?? [])}
+                        </p>
                       </div>
-                    ))}
-                  </div>
-                )}
-                {canEdit && (
-                  <form onSubmit={(e) => { e.preventDefault(); postComment(); }} className="flex items-center gap-2 mt-1">
-                    <MentionInput
-                      value={commentText}
-                      onChange={setCommentText}
-                      onSubmit={postComment}
-                      people={people ?? []}
-                      disabled={posting}
-                      placeholder="Add a comment… use @ to mention"
-                      className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
-                    />
-                    <button
-                      type="submit"
-                      disabled={posting || !commentText.trim()}
-                      className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                    >
-                      {posting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    </button>
-                  </form>
-                )}
-              </div>
-            ) : (
-            <div className="p-6 overflow-y-auto">
-              {canEdit ? (
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {canEdit && (
+                <form onSubmit={(e) => { e.preventDefault(); postComment(); }} className="mt-auto flex items-center gap-2">
+                  <MentionInput
+                    value={commentText}
+                    onChange={setCommentText}
+                    onSubmit={postComment}
+                    people={people ?? []}
+                    disabled={posting}
+                    placeholder="Add a comment. Type @ to mention someone"
+                    className={cx(inputClass, 'h-9')}
+                  />
+                  <Button type="submit" variant="primary" size="lg" className="h-9" busy={posting} disabled={!commentText.trim()}>
+                    Send
+                  </Button>
+                </form>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-5 pb-2">
+              {canEdit && (
                 <input
                   key={selectedItem.id}
+                  aria-label="Task title"
                   defaultValue={selectedItem.title}
                   onBlur={(e) => {
                     const v = e.target.value.trim();
@@ -452,63 +461,88 @@ export function KanbanBoard({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
                   }}
-                  className="w-full text-xl font-bold text-slate-900 dark:text-slate-100 mb-6 bg-transparent border border-transparent hover:border-slate-200 dark:hover:border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2 -mx-2 py-1 outline-none transition-colors"
+                  className="-mx-2 w-[calc(100%+1rem)] rounded-md border border-transparent bg-transparent px-2 py-1 text-title font-semibold tracking-[-0.01em] text-ink outline-none transition-colors hover:border-line focus:border-ink"
                 />
-              ) : (
-                <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-6">{selectedItem.title}</h2>
               )}
 
-              <div className="flex flex-col gap-4 mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center border bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shrink-0">
-                    <span className="font-bold text-xs">{getInitials(selectedItem.assignee)}</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Assigned to</p>
-                    {canEdit ? (
-                      <input
-                        key={selectedItem.id}
-                        defaultValue={selectedItem.assignee}
-                        onBlur={(e) => {
-                          // Assignee can't be empty — the column grouping and the
-                          // backend both require a name; fall back to "Unassigned".
-                          const next = e.target.value.trim() || 'Unassigned';
-                          if (next !== selectedItem.assignee) onItemUpdate(selectedItem.id, { assignee: next });
-                          else e.target.value = selectedItem.assignee;
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                        }}
-                        placeholder="Unassigned"
-                        className="w-full text-sm font-bold text-slate-900 dark:text-slate-100 leading-none mt-0.5 bg-transparent border border-transparent hover:border-slate-200 dark:hover:border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-md px-1.5 -mx-1.5 py-1 outline-none transition-colors"
-                      />
-                    ) : (
-                      <p className="text-sm font-bold text-slate-900 dark:text-slate-100 leading-none mt-0.5">{selectedItem.assignee}</p>
-                    )}
-                  </div>
-                </div>
+              <label className="flex items-center gap-2.5 text-ui text-ink">
+                <Checkbox
+                  checked={selectedItem.status === 'completed'}
+                  disabled={!canEdit}
+                  onChange={(done) => onItemUpdate(selectedItem.id, { status: done ? 'completed' : 'pending' })}
+                  label="Done"
+                />
+                {selectedItem.status === 'completed' ? 'Done' : 'Mark as done'}
+              </label>
 
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center border bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 shrink-0">
-                    <Calendar className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-1">Due Date</p>
+              <dl className="grid grid-cols-[6rem_1fr] items-center gap-x-3 gap-y-2.5 text-ui">
+                <dt className="text-ink-2">Owner</dt>
+                <dd className="flex items-center gap-2">
+                  <Monogram name={selectedItem.assignee} mine={isMine(selectedItem.assignee)} />
+                  {canEdit ? (
                     <input
-                      type="date"
-                      value={selectedItem.dueDate || ''}
-                      disabled={!canEdit}
-                      onChange={(e) => onItemUpdate(selectedItem.id, { dueDate: e.target.value })}
-                      className="text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 focus:ring-1 focus:ring-indigo-500 outline-none text-slate-900 dark:text-slate-100 max-w-[200px] disabled:opacity-60 disabled:cursor-not-allowed"
+                      key={selectedItem.id}
+                      aria-label="Owner"
+                      defaultValue={selectedItem.assignee}
+                      onBlur={(e) => {
+                        // An owner cannot be empty: the grouping and the backend
+                        // both need a name, so fall back to "Unassigned".
+                        const next = e.target.value.trim() || 'Unassigned';
+                        if (next !== selectedItem.assignee) onItemUpdate(selectedItem.id, { assignee: next });
+                        else e.target.value = selectedItem.assignee;
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                      }}
+                      placeholder="Unassigned"
+                      className={cx(inputClass, 'h-8 max-w-[15rem]')}
                     />
-                  </div>
-                </div>
-              </div>
+                  ) : (
+                    <span className="text-ink">{selectedItem.assignee}</span>
+                  )}
+                </dd>
 
-              <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl p-4">
-                <h3 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Description / Context</h3>
+                <dt className="text-ink-2">Priority</dt>
+                <dd>
+                  {canEdit ? (
+                    <Segmented
+                      label="Priority"
+                      value={(selectedItem.priority ?? 'Medium') as 'High' | 'Medium' | 'Low'}
+                      onChange={(p) => onItemUpdate(selectedItem.id, { priority: p })}
+                      options={[{ value: 'High', label: 'High' }, { value: 'Medium', label: 'Medium' }, { value: 'Low', label: 'Low' }]}
+                    />
+                  ) : (
+                    <span className={priorityClass(selectedItem.priority)}>{selectedItem.priority ?? 'None'}</span>
+                  )}
+                </dd>
+
+                <dt className="text-ink-2">Due</dt>
+                <dd>
+                  <input
+                    type="date"
+                    aria-label="Due date"
+                    value={selectedItem.dueDate || ''}
+                    disabled={!canEdit}
+                    onChange={(e) => onItemUpdate(selectedItem.id, { dueDate: e.target.value })}
+                    className={cx(inputClass, 'tnum h-8 w-auto')}
+                  />
+                </dd>
+              </dl>
+
+              {selectedItem.blockedBy && selectedItem.blockedBy.length > 0 && (
+                <div className="rounded-md bg-danger-wash px-3 py-2.5 text-ui text-danger">
+                  <p className="font-medium">Blocked by</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                    {selectedItem.blockedBy.map((b, i) => <li key={i}>{b}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="task-notes" className="text-ui font-medium text-ink">Notes</label>
                 {canEdit ? (
                   <textarea
+                    id="task-notes"
                     key={selectedItem.id}
                     defaultValue={selectedItem.description ?? ''}
                     onBlur={(e) => {
@@ -516,54 +550,18 @@ export function KanbanBoard({
                       if (v !== (selectedItem.description ?? '')) onItemUpdate(selectedItem.id, { description: v });
                     }}
                     rows={4}
-                    placeholder="Add a description or context for this task…"
-                    className="w-full text-sm text-slate-600 dark:text-slate-300 leading-relaxed bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors resize-y min-h-[88px]"
+                    placeholder="Context from the meeting, links, anything the owner needs"
+                    className={cx(inputClass, 'min-h-[5.5rem] resize-y py-2 leading-relaxed')}
                   />
                 ) : (
-                  <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-wrap">
-                    {selectedItem.description || "No detailed description was extracted from the transcript."}
+                  <p className="whitespace-pre-wrap text-ui leading-relaxed text-ink-2">
+                    {selectedItem.description || 'No notes were taken from the transcript for this task.'}
                   </p>
                 )}
               </div>
-
-              {selectedItem.blockedBy && selectedItem.blockedBy.length > 0 && (
-                <div className="mt-4 bg-red-50 dark:bg-red-900/15 border border-red-100 dark:border-red-900/40 rounded-xl p-4">
-                  <h3 className="text-xs font-bold text-red-700 dark:text-red-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                    <Lock className="w-3.5 h-3.5" /> Blocked by
-                  </h3>
-                  <ul className="list-disc pl-4 space-y-1 text-sm text-slate-700 dark:text-slate-300">
-                    {selectedItem.blockedBy.map((b, i) => (
-                      <li key={i}>{b}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
             </div>
-            )}
-
-            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex justify-between items-center shrink-0">
-              {canEdit ? (
-                <button
-                  onClick={() => {
-                    onItemDelete(selectedItem.id);
-                    setSelectedItemId(null);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" /> Delete
-                </button>
-              ) : (
-                <span />
-              )}
-              <button
-                onClick={() => setSelectedItemId(null)}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-sm"
-              >
-                Done
-              </button>
-            </div>
-          </motion.div>
-        </div>
+          )}
+        </Dialog>
       )}
     </div>
   );

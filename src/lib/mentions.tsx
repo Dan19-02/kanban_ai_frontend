@@ -25,10 +25,7 @@ export function renderMentions(text: string, people: string[] = []): React.React
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) out.push(text.slice(last, m.index));
     out.push(
-      <span
-        key={key++}
-        className="font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 rounded px-1"
-      >
+      <span key={key++} className="font-medium text-ink">
         @{m[1]}
       </span>,
     );

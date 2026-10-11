@@ -1,53 +1,55 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
-import {
-  Plus, Loader2, KanbanSquare, Trash2, Users, ListChecks, Sparkles, X, AlertCircle,
-  ArrowLeft, Settings, LayoutGrid, ClipboardList, CheckCircle2, Circle, Calendar, User,
-  Share2, Eye,
-} from 'lucide-react';
-import { Header } from '../components/Header';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { AppShell, ColorPicker, notifyProjectsChanged } from '../components/AppShell';
 import { ShareModal } from '../components/ShareModal';
+import {
+  Alert, Button, Checkbox, Dialog, Empty, Field, Input, Monogram, PageLoading, Segmented, Select, Tabs, Textarea,
+  buttonClass, cx,
+} from '../components/ui';
+import { useAuth } from '../auth/AuthContext';
 import { api, ApiError } from '../api/client';
 import type { BoardSummary, Project, ProjectColor, RollupTask } from '../types';
-import { colorClasses, PROJECT_COLORS } from '../lib/projectColors';
-import { timeAgo } from '../lib/time';
+import { colorClasses } from '../lib/projectColors';
+import { BoardList } from './DashboardPage';
 
 type Tab = 'boards' | 'tasks';
 type StatusFilter = 'all' | 'pending' | 'completed';
 
-const priorityBadge: Record<string, string> = {
-  High: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
-  Medium: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
-  Low: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300',
-};
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** A due date as "15 Oct". Anything that is not a date is shown as written. */
+function formatDue(value: string): string {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  const date = iso ? new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) : new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) });
+}
 
 export function ProjectPage() {
   const { id } = useParams<{ id: string }>();
   if (!id) return null;
-  return <ProjectView projectId={id} />;
+  // Keyed so moving between projects starts from a clean state.
+  return <ProjectView key={id} projectId={id} />;
 }
 
 function ProjectView({ projectId }: { projectId: string }) {
   const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
   const [boards, setBoards] = useState<BoardSummary[] | null>(null);
+  const [tasks, setTasks] = useState<RollupTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [tab, setTab] = useState<Tab>('boards');
 
-  // Board creation
   const [creating, setCreating] = useState(false);
-  const [newBoardName, setNewBoardName] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  // Settings & sharing
   const [showSettings, setShowSettings] = useState(false);
   const [showShare, setShowShare] = useState(false);
 
   const isOwner = project?.role === 'OWNER';
-  const canEdit = project?.role !== 'VIEWER'; // owner or editor
+  const canEdit = !!project && project.role !== 'VIEWER'; // owner or editor
 
-  const loadProject = () => {
+  useEffect(() => {
     api.projects
       .get(projectId)
       .then(({ project, boards }) => {
@@ -56,317 +58,172 @@ function ProjectView({ projectId }: { projectId: string }) {
       })
       .catch((err) => {
         if (err instanceof ApiError && err.status === 404) setNotFound(true);
-        else setError(err instanceof ApiError ? err.message : 'Failed to load project');
+        else setError(err instanceof ApiError ? err.message : 'The project could not be loaded. Reload the page to try again.');
       });
-  };
-
-  useEffect(loadProject, [projectId]);
-
-  const handleCreateBoard = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newBoardName.trim()) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const { board } = await api.boards.create(newBoardName.trim(), projectId);
-      navigate(`/board/${board.id}`);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to create board');
-      setSubmitting(false);
-    }
-  };
-
-  const handleDeleteBoard = async (e: React.MouseEvent, board: BoardSummary) => {
-    e.stopPropagation();
-    if (!confirm(`Delete "${board.name}"? This cannot be undone.`)) return;
-    try {
-      await api.boards.remove(board.id);
-      setBoards((prev) => prev?.filter((b) => b.id !== board.id) ?? null);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to delete board');
-    }
-  };
-
-  if (notFound) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 p-4 text-center">
-        <AlertCircle className="w-10 h-10 text-slate-400 mb-3" />
-        <p className="font-semibold text-slate-900 dark:text-slate-100">Project not found</p>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 mb-5">
-          It may have been deleted, or you don’t have access.
-        </p>
-        <Link to="/" className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-700">
-          Back to projects
-        </Link>
-      </div>
-    );
-  }
-
-  const c = project ? colorClasses(project.color) : colorClasses('indigo');
-
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col font-sans transition-colors">
-      <Header
-        center={
-          project && (
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-slate-300 dark:text-slate-700">/</span>
-              <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${c.dot}`} />
-              <span className="font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[160px] sm:max-w-xs">
-                {project.name}
-              </span>
-            </div>
-          )
-        }
-        actions={
-          <div className="flex items-center gap-2">
-            {project && isOwner && (
-              <button
-                onClick={() => setShowShare(true)}
-                className="flex items-center gap-2 px-2.5 sm:px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-              >
-                <Share2 className="w-4 h-4" />
-                <span className="hidden sm:inline">Share</span>
-              </button>
-            )}
-            {tab === 'boards' && canEdit && (
-              <button
-                onClick={() => setCreating(true)}
-                className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-sm"
-              >
-                <Plus className="w-4 h-4" />
-                <span className="hidden sm:inline">New board</span>
-              </button>
-            )}
-          </div>
-        }
-      />
-
-      <main className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-8">
-        <Link
-          to="/"
-          className="inline-flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 mb-4 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" /> All projects
-        </Link>
-
-        <div className="flex items-start justify-between gap-4 mb-6">
-          <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2.5">
-              {project && <span className={`w-8 h-8 rounded-lg flex items-center justify-center ${c.soft}`}>
-                <KanbanSquare className={`w-5 h-5 ${c.text}`} />
-              </span>}
-              {project?.name ?? '…'}
-            </h1>
-            {project?.description && (
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1.5 max-w-2xl">{project.description}</p>
-            )}
-          </div>
-          {project && (isOwner ? (
-            <button
-              onClick={() => setShowSettings(true)}
-              className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors shrink-0"
-              aria-label="Project settings"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-          ) : (
-            <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 shrink-0">
-              {project.role === 'VIEWER' ? <><Eye className="w-3 h-3" /> View only</> : 'Editor'}
-            </span>
-          ))}
-        </div>
-
-        {/* Tabs */}
-        <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 mb-6">
-          <TabButton active={tab === 'boards'} onClick={() => setTab('boards')} icon={<LayoutGrid className="w-4 h-4" />}>
-            Boards{boards ? ` (${boards.length})` : ''}
-          </TabButton>
-          <TabButton active={tab === 'tasks'} onClick={() => setTab('tasks')} icon={<ClipboardList className="w-4 h-4" />}>
-            All tasks
-          </TabButton>
-        </div>
-
-        {error && (
-          <div className="mb-6 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/50 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-800 dark:text-red-400">{error}</p>
-          </div>
-        )}
-
-        {tab === 'boards' ? (
-          <BoardsTab
-            boards={boards}
-            canCreate={canEdit}
-            canDelete={!!isOwner}
-            onOpen={(b) => navigate(`/board/${b.id}`)}
-            onDelete={handleDeleteBoard}
-            onNew={() => setCreating(true)}
-          />
-        ) : (
-          <TasksTab projectId={projectId} canEdit={canEdit} onError={setError} />
-        )}
-      </main>
-
-      {creating && (
-        <Modal title="New board" onClose={() => setCreating(false)}>
-          <form onSubmit={handleCreateBoard} className="p-5 flex flex-col gap-4">
-            <label className="block">
-              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Board name</span>
-              <input
-                autoFocus
-                value={newBoardName}
-                onChange={(e) => setNewBoardName(e.target.value)}
-                placeholder="e.g. Mon standup, Client call…"
-                disabled={submitting}
-                maxLength={120}
-                className="mt-1.5 w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
-              />
-            </label>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setCreating(false)} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
-                Cancel
-              </button>
-              <button type="submit" disabled={submitting || !newBoardName.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2">
-                {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                Create
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
-
-      {showSettings && project && (
-        <SettingsModal
-          project={project}
-          boardCount={boards?.length ?? 0}
-          onClose={() => setShowSettings(false)}
-          onUpdated={(p) => setProject(p)}
-          onDeleted={() => navigate('/')}
-        />
-      )}
-
-      {showShare && project && isOwner && (
-        <ShareModal
-          kind="project"
-          id={project.id}
-          onClose={() => setShowShare(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-function TabButton({
-  active, onClick, icon, children,
-}: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
-        active
-          ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-          : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-      }`}
-    >
-      {icon}
-      {children}
-    </button>
-  );
-}
-
-// --- Boards tab -------------------------------------------------------------
-
-function BoardsTab({
-  boards, canCreate, canDelete, onOpen, onDelete, onNew,
-}: {
-  boards: BoardSummary[] | null;
-  canCreate: boolean;
-  canDelete: boolean;
-  onOpen: (b: BoardSummary) => void;
-  onDelete: (e: React.MouseEvent, b: BoardSummary) => void;
-  onNew: () => void;
-}) {
-  if (boards === null) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
-      </div>
-    );
-  }
-  if (boards.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-24 text-center">
-        <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-          <KanbanSquare className="w-7 h-7 text-slate-400" />
-        </div>
-        <p className="font-semibold text-slate-900 dark:text-slate-100">No boards yet</p>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 mb-5 max-w-sm">
-          {canCreate
-            ? 'Add a board for each call or meeting — paste its transcript and AI turns it into tasks.'
-            : 'There are no boards in this project yet.'}
-        </p>
-        {canCreate && (
-          <button onClick={onNew} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-700 transition-colors shadow-sm">
-            <Plus className="w-4 h-4" /> New board
-          </button>
-        )}
-      </div>
-    );
-  }
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {boards.map((board) => (
-        <div
-          key={board.id}
-          onClick={() => onOpen(board)}
-          className="group bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md transition-all cursor-pointer flex flex-col gap-4"
-        >
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="font-bold text-slate-900 dark:text-slate-100 leading-tight line-clamp-2">{board.name}</h3>
-            {canDelete && (
-            <button
-              onClick={(e) => onDelete(e, board)}
-              aria-label="Delete board"
-              className="p-1.5 text-slate-300 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-all shrink-0"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-            )}
-          </div>
-          <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
-            <span className="flex items-center gap-1"><ListChecks className="w-3.5 h-3.5" /> {board.itemCount}</span>
-            <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {board.memberCount}</span>
-            {board.hasAnalysis && (
-              <span className="flex items-center gap-1 text-indigo-500 dark:text-indigo-400">
-                <Sparkles className="w-3.5 h-3.5" /> Analyzed
-              </span>
-            )}
-            <span className="ml-auto text-slate-400 dark:text-slate-500">{timeAgo(board.updatedAt)}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// --- All-tasks rollup tab ---------------------------------------------------
-
-function TasksTab({
-  projectId, canEdit, onError,
-}: { projectId: string; canEdit: boolean; onError: (m: string) => void }) {
-  const navigate = useNavigate();
-  const [tasks, setTasks] = useState<RollupTask[] | null>(null);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [assignee, setAssignee] = useState<string>('all');
-  const [busyId, setBusyId] = useState<string | null>(null);
-
-  useEffect(() => {
+    // Loaded up front so the tab can show its count.
     api.projects
       .tasks(projectId)
       .then(({ tasks }) => setTasks(tasks))
-      .catch((err) => onError(err instanceof ApiError ? err.message : 'Failed to load tasks'));
-  }, [projectId, onError]);
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 404) return;
+        setError(err instanceof ApiError ? err.message : 'The tasks could not be loaded. Reload the page to try again.');
+      });
+  }, [projectId]);
+
+  const closeCreating = useCallback(() => setCreating(false), []);
+  const closeSettings = useCallback(() => setShowSettings(false), []);
+  const closeShare = useCallback(() => setShowShare(false), []);
+
+  if (notFound) {
+    return (
+      <AppShell crumbs={[{ label: 'Home', to: '/' }, { label: 'Project not found' }]}>
+        <div className="mx-auto w-full max-w-[1040px] px-5 py-10 lg:px-8">
+          <Empty title="Project not found">
+            <p>It may have been deleted, or you do not have access to it.</p>
+            <Link to="/" className={buttonClass('secondary', 'md', 'mt-4')}>Back to Home</Link>
+          </Empty>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (!project || !boards) {
+    return (
+      <AppShell crumbs={[{ label: 'Home', to: '/' }, { label: 'Project' }]}>
+        <div className="mx-auto w-full max-w-[1040px] px-5 py-10 lg:px-8">
+          {error ? <Alert>{error}</Alert> : <PageLoading />}
+        </div>
+      </AppShell>
+    );
+  }
+
+  return (
+    <AppShell
+      crumbs={[{ label: 'Home', to: '/' }, { label: project.name }]}
+      actions={
+        // Sharing, settings and new boards are the owner's: the server refuses them from anyone else.
+        isOwner && (
+          <>
+            <Button variant="ghost" onClick={() => setShowShare(true)}>Share</Button>
+            <Button variant="ghost" onClick={() => setShowSettings(true)}>Settings</Button>
+            <Button variant="primary" onClick={() => setCreating(true)}>New board</Button>
+          </>
+        )
+      }
+    >
+      <div className="mx-auto w-full max-w-[1040px] px-5 py-10 lg:px-8">
+        <header>
+          <div className="flex items-baseline gap-3">
+            <span
+              className={cx('h-2.5 w-2.5 relative -top-[0.3rem] shrink-0 rounded-full', colorClasses(project.color).dot)}
+              aria-hidden="true"
+            />
+            <h1 className="min-w-0 break-words text-display font-semibold leading-tight tracking-[-0.02em] text-ink">
+              {project.name}
+            </h1>
+          </div>
+          {project.description && <p className="mt-2 max-w-2xl text-body text-ink-2">{project.description}</p>}
+          {!isOwner && (
+            <p className="mt-2 text-meta text-ink-3">
+              {project.role === 'VIEWER'
+                ? 'Shared with you as a viewer. You can read everything here.'
+                : 'Shared with you as an editor. You can update tasks.'}
+            </p>
+          )}
+        </header>
+
+        <div className="mt-8">
+          <Tabs<Tab>
+            label="Project views"
+            value={tab}
+            onChange={setTab}
+            tabs={[
+              { value: 'boards', label: 'Boards', count: boards.length },
+              { value: 'tasks', label: 'All tasks', count: tasks?.length },
+            ]}
+          />
+        </div>
+
+        {error && (
+          <div className="mt-5">
+            <Alert onDismiss={() => setError(null)}>{error}</Alert>
+          </div>
+        )}
+
+        <div className="mt-5" role="tabpanel" aria-label={tab === 'boards' ? 'Boards' : 'All tasks'}>
+          {tab === 'boards' ? (
+            boards.length === 0 ? (
+              <Empty title="No boards yet">
+                {isOwner ? (
+                  <>
+                    <p>Add a board for each call or meeting, and paste its transcript to turn it into tasks.</p>
+                    <Button variant="primary" className="mt-4" onClick={() => setCreating(true)}>New board</Button>
+                  </>
+                ) : (
+                  'The owner has not added a board to this project yet.'
+                )}
+              </Empty>
+            ) : (
+              <BoardList
+                boards={boards}
+                canDelete={() => isOwner}
+                onDeleted={(board) => {
+                  setBoards((prev) => prev?.filter((b) => b.id !== board.id) ?? null);
+                  setTasks((prev) => prev?.filter((t) => t.boardId !== board.id) ?? null);
+                  notifyProjectsChanged();
+                }}
+              />
+            )
+          ) : (
+            <TasksTab tasks={tasks} setTasks={setTasks} canEdit={canEdit} onError={setError} />
+          )}
+        </div>
+      </div>
+
+      {creating && isOwner && <NewBoardDialog projectId={projectId} onClose={closeCreating} />}
+
+      {showSettings && isOwner && (
+        <SettingsDialog
+          project={project}
+          boardCount={boards.length}
+          onClose={closeSettings}
+          onUpdated={(p) => {
+            setProject(p);
+            notifyProjectsChanged();
+          }}
+          onDeleted={() => {
+            notifyProjectsChanged();
+            navigate('/');
+          }}
+        />
+      )}
+
+      {showShare && isOwner && <ShareModal kind="project" id={project.id} onClose={closeShare} />}
+    </AppShell>
+  );
+}
+
+// ─── All tasks ──────────────────────────────────────────────────────────────
+
+const PRIORITY_CLASS: Record<NonNullable<RollupTask['priority']>, string> = {
+  High: 'font-medium text-danger',
+  Medium: 'text-ink-2',
+  Low: 'text-ink-3',
+};
+
+/** Every task from every board in the project, in one list. */
+function TasksTab({
+  tasks, setTasks, canEdit, onError,
+}: {
+  tasks: RollupTask[] | null;
+  setTasks: React.Dispatch<React.SetStateAction<RollupTask[] | null>>;
+  canEdit: boolean;
+  onError: (message: string) => void;
+}) {
+  const { user } = useAuth();
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [assignee, setAssignee] = useState('all');
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const assignees = useMemo(
     () => Array.from(new Set((tasks ?? []).map((t) => t.assignee))).sort(),
@@ -396,175 +253,216 @@ function TasksTab({
     setTasks((prev) => prev?.map((t) => (t.id === task.id ? { ...t, status: next } : t)) ?? null);
     try {
       await api.boards.updateItem(task.boardId, task.id, { status: next });
+      notifyProjectsChanged(); // the sidebar shows the open count
     } catch (err) {
       // Revert on failure.
       setTasks((prev) => prev?.map((t) => (t.id === task.id ? { ...t, status: task.status } : t)) ?? null);
-      onError(err instanceof ApiError ? err.message : 'Failed to update task');
+      onError(err instanceof ApiError ? err.message : 'The task could not be updated. Try again.');
     } finally {
       setBusyId(null);
     }
   };
 
-  if (tasks === null) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
-      </div>
-    );
-  }
+  if (tasks === null) return <PageLoading />;
   if (tasks.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 text-center">
-        <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-          <ClipboardList className="w-7 h-7 text-slate-400" />
-        </div>
-        <p className="font-semibold text-slate-900 dark:text-slate-100">No tasks yet</p>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-sm">
-          Tasks from every board in this project show up here — your single command center.
-        </p>
-      </div>
+      <Empty title="No tasks yet">
+        Tasks from every board in this project show up here, in one list. Open a board and paste its transcript to
+        get the first ones.
+      </Empty>
     );
   }
 
   return (
     <div>
-      {/* Stat strip */}
-      <div className="grid grid-cols-3 gap-3 mb-5">
-        <Stat label="Total tasks" value={stats.total} />
-        <Stat label="Open" value={stats.open} accent="text-amber-600 dark:text-amber-400" />
-        <Stat label="Done" value={stats.done} accent="text-emerald-600 dark:text-emerald-400" />
-      </div>
+      <p className="tnum text-ui text-ink-2">
+        <span className="font-medium text-ink">{plural(stats.total, 'task', 'tasks')}</span>
+        {', '}{stats.open} open, {stats.done} done
+      </p>
 
-      {/* Filters */}
-      <div className="flex items-center gap-2 flex-wrap mb-4">
-        <div className="flex items-center rounded-lg border border-slate-200 dark:border-slate-800 overflow-hidden text-sm">
-          {(['all', 'pending', 'completed'] as StatusFilter[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
-              className={`px-3 py-1.5 font-medium capitalize transition-colors ${
-                statusFilter === s
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
-              }`}
-            >
-              {s === 'pending' ? 'Open' : s === 'completed' ? 'Done' : 'All'}
-            </button>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Segmented<StatusFilter>
+          label="Status"
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'pending', label: 'Open' },
+            { value: 'completed', label: 'Done' },
+          ]}
+        />
+        <Select value={assignee} onChange={(e) => setAssignee(e.target.value)} aria-label="Owner" className="max-w-[14rem]">
+          <option value="all">Everyone</option>
+          {assignees.map((a) => (
+            <option key={a} value={a}>{a}</option>
           ))}
-        </div>
-        <div className="relative">
-          <User className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <select
-            value={assignee}
-            onChange={(e) => setAssignee(e.target.value)}
-            className="pl-8 pr-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
-          >
-            <option value="all">Everyone</option>
-            {assignees.map((a) => (
-              <option key={a} value={a}>{a}</option>
-            ))}
-          </select>
-        </div>
-        <span className="text-xs text-slate-400 dark:text-slate-500 ml-auto">
-          {filtered.length} shown
-        </span>
+        </Select>
+        <span className="tnum ml-auto text-meta text-ink-3" role="status">{filtered.length} shown</span>
       </div>
 
-      {/* Task list */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden">
-        {filtered.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
-            No tasks match these filters.
-          </p>
-        ) : (
-          filtered.map((task) => {
+      {filtered.length === 0 ? (
+        <div className="mt-4">
+          <Empty title="No tasks match these filters">
+            <Button
+              className="mt-3"
+              onClick={() => {
+                setStatusFilter('all');
+                setAssignee('all');
+              }}
+            >
+              Show all tasks
+            </Button>
+          </Empty>
+        </div>
+      ) : (
+        <ul className="-mx-2 mt-4 border-t border-line">
+          {filtered.map((task) => {
             const done = task.status === 'completed';
+            const mine = !!user && task.assignee === user.name;
+            const blocked = !done && task.blockedBy.length > 0;
+            const due = task.dueDate ? formatDue(task.dueDate) : null;
             return (
-              <div
+              <li
                 key={task.id}
-                onClick={() => navigate(`/board/${task.boardId}`)}
-                className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
+                className="relative flex items-start gap-3 border-b border-line px-2 py-3 transition-colors hover:bg-wash md:grid md:grid-cols-[1.125rem_minmax(0,1fr)_10rem_10rem_4rem_4.5rem] md:gap-4"
               >
-                <button
-                  onClick={(e) => { e.stopPropagation(); if (canEdit) toggle(task); }}
-                  disabled={busyId === task.id || !canEdit}
-                  aria-label={done ? 'Mark as open' : 'Mark as done'}
-                  className="shrink-0 disabled:opacity-50 disabled:cursor-default"
-                >
-                  {busyId === task.id ? (
-                    <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
-                  ) : done ? (
-                    <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                  ) : (
-                    <Circle className="w-5 h-5 text-slate-300 dark:text-slate-600 hover:text-indigo-500" />
-                  )}
-                </button>
+                <span className="relative z-10 mt-px flex">
+                  <Checkbox
+                    checked={done}
+                    onChange={() => toggle(task)}
+                    disabled={!canEdit || busyId === task.id}
+                    label={done ? `Mark "${task.title}" as open` : `Mark "${task.title}" as done`}
+                  />
+                </span>
 
                 <div className="min-w-0 flex-1">
-                  <p className={`text-sm font-medium truncate ${done ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-slate-100'}`}>
-                    {task.title}
-                  </p>
-                  <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-400 dark:text-slate-500">
-                    <span className="flex items-center gap-1 truncate">
-                      <KanbanSquare className="w-3 h-3 shrink-0" />
-                      <span className="truncate max-w-[160px]">{task.boardName}</span>
-                    </span>
-                    {task.dueDate && (
-                      <span className="flex items-center gap-1 shrink-0">
-                        <Calendar className="w-3 h-3" /> {task.dueDate}
-                      </span>
+                  {/* The row opens the board the task came from. */}
+                  <Link
+                    to={`/board/${task.boardId}`}
+                    className={cx(
+                      'block after:absolute after:inset-0 md:truncate',
+                      done ? 'text-ink-3 line-through' : 'font-medium text-ink',
                     )}
-                  </div>
+                  >
+                    {task.title}
+                  </Link>
+                  {blocked && (
+                    <p className="mt-0.5 text-meta text-danger md:truncate">Blocked by {task.blockedBy.join(', ')}</p>
+                  )}
+                  <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta text-ink-3 md:hidden">
+                    <Monogram name={task.assignee} mine={mine} size="sm" />
+                    <span className="text-ink-2">{task.assignee}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{task.boardName}</span>
+                    {task.priority && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className={PRIORITY_CLASS[task.priority]}>{task.priority}</span>
+                      </>
+                    )}
+                    {due && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="tnum">{due}</span>
+                      </>
+                    )}
+                  </p>
                 </div>
 
-                {task.priority && (
-                  <span className={`hidden sm:inline text-[10px] font-bold px-2 py-0.5 rounded uppercase shrink-0 ${priorityBadge[task.priority]}`}>
-                    {task.priority}
-                  </span>
-                )}
-                <span className="hidden md:flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 shrink-0 w-32 justify-end truncate">
-                  <span className="w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[9px] font-bold text-slate-500 dark:text-slate-400 shrink-0">
-                    {task.assignee.slice(0, 2).toUpperCase()}
-                  </span>
+                <span className="flex min-w-0 items-center gap-2 text-ink-2 max-md:hidden">
+                  <Monogram name={task.assignee} mine={mine} size="sm" />
                   <span className="truncate">{task.assignee}</span>
                 </span>
-              </div>
+                <span className="truncate text-ink-2 max-md:hidden">{task.boardName}</span>
+                <span className={cx('max-md:hidden', task.priority && PRIORITY_CLASS[task.priority])}>{task.priority}</span>
+                <span className="tnum text-right text-ink-2 max-md:hidden">{due}</span>
+              </li>
             );
-          })
-        )}
-      </div>
+          })}
+        </ul>
+      )}
     </div>
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: number; accent?: string }) {
+// ─── New board ──────────────────────────────────────────────────────────────
+
+function NewBoardDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+  const navigate = useNavigate();
+  const [name, setName] = useState('');
+  const [transcript, setTranscript] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const nameInput = useRef<HTMLInputElement>(null);
+
+  // Start in the name field rather than on the dialog's close button.
+  useEffect(() => nameInput.current?.focus(), []);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { board } = await api.boards.create(name.trim(), projectId);
+      const text = transcript.trim();
+      // The board page runs the analysis when it is handed a transcript.
+      navigate(`/board/${board.id}`, text ? { state: { transcript: text } } : undefined);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'The board could not be created. Try again.');
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-      <p className={`text-2xl font-bold ${accent ?? 'text-slate-900 dark:text-slate-100'}`}>{value}</p>
-      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{label}</p>
-    </div>
+    <Dialog
+      title="New board"
+      onClose={onClose}
+      width="max-w-lg"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" type="submit" form="new-board" busy={busy} disabled={!name.trim()}>
+            Create board
+          </Button>
+        </>
+      }
+    >
+      <form id="new-board" onSubmit={submit} className="flex flex-col gap-4 pb-2">
+        {error && <Alert>{error}</Alert>}
+        <Field label="Name">
+          {(p) => (
+            <Input
+              {...p}
+              ref={nameInput}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Monday standup"
+              disabled={busy}
+              maxLength={120}
+            />
+          )}
+        </Field>
+        <Field label="Transcript" hint="Optional. Paste it now, or add it on the board later.">
+          {(p) => (
+            <Textarea
+              {...p}
+              value={transcript}
+              onChange={(e) => setTranscript(e.target.value)}
+              rows={6}
+              disabled={busy}
+              className="resize-y"
+            />
+          )}
+        </Field>
+      </form>
+    </Dialog>
   );
 }
 
-// --- Shared modal shell + settings ------------------------------------------
+// ─── Settings ───────────────────────────────────────────────────────────────
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-800">
-        <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800">
-          <h3 className="font-bold text-slate-900 dark:text-slate-100">{title}</h3>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function SettingsModal({
+function SettingsDialog({
   project, boardCount, onClose, onUpdated, onDeleted,
 }: {
   project: Project;
@@ -577,12 +475,19 @@ function SettingsModal({
   const [description, setDescription] = useState(project.description ?? '');
   const [color, setColor] = useState<ProjectColor>(project.color);
   const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const confirmText = useRef<HTMLParagraphElement>(null);
+
+  // The button that opened the confirmation is gone, so move focus into it.
+  useEffect(() => {
+    if (confirming) confirmText.current?.focus();
+  }, [confirming]);
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || saving) return;
     setSaving(true);
     setErr(null);
     try {
@@ -594,104 +499,89 @@ function SettingsModal({
       onUpdated(updated);
       onClose();
     } catch (e2) {
-      setErr(e2 instanceof ApiError ? e2.message : 'Failed to save');
+      setErr(e2 instanceof ApiError ? e2.message : 'The changes could not be saved. Try again.');
       setSaving(false);
     }
   };
 
   const remove = async () => {
-    if (!confirm(`Delete project "${project.name}"? This cannot be undone.`)) return;
     setDeleting(true);
     setErr(null);
     try {
       await api.projects.remove(project.id);
       onDeleted();
     } catch (e2) {
-      setErr(e2 instanceof ApiError ? e2.message : 'Failed to delete');
+      setErr(e2 instanceof ApiError ? e2.message : 'The project could not be deleted. Try again.');
       setDeleting(false);
     }
   };
 
-  return (
-    <Modal title="Project settings" onClose={onClose}>
-      <form onSubmit={save} className="p-5 flex flex-col gap-4">
-        {err && (
-          <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/50 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-800 dark:text-red-400">{err}</p>
-          </div>
-        )}
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Project name</span>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            disabled={saving}
-            maxLength={120}
-            className="mt-1.5 w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-900 dark:text-slate-100"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Description</span>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            disabled={saving}
-            rows={2}
-            maxLength={500}
-            className="mt-1.5 w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-900 dark:text-slate-100 resize-none"
-          />
-        </label>
-        <div>
-          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Colour</span>
-          <div className="mt-2 flex items-center gap-2 flex-wrap">
-            {PROJECT_COLORS.map((col) => {
-              const cc = colorClasses(col);
-              return (
-                <button
-                  key={col}
-                  type="button"
-                  aria-label={col}
-                  onClick={() => setColor(col)}
-                  className={`w-7 h-7 rounded-full ${cc.dot} transition-transform ${
-                    color === col ? 'ring-2 ring-offset-2 ring-slate-400 dark:ring-offset-slate-900 scale-110' : 'hover:scale-110'
-                  }`}
-                />
-              );
-            })}
-          </div>
+  // Deleting is confirmed in the same dialog, as a second step.
+  if (confirming) {
+    return (
+      <Dialog
+        title="Delete project?"
+        onClose={onClose}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => { setConfirming(false); setErr(null); }}>Cancel</Button>
+            <Button variant="danger" onClick={remove} busy={deleting}>Delete project</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3 pb-2">
+          {err && <Alert>{err}</Alert>}
+          <p ref={confirmText} tabIndex={-1} className="text-ui text-ink-2 outline-none">
+            <span className="font-medium text-ink">{project.name}</span> will be removed for everyone it is shared
+            with. This cannot be undone.
+          </p>
         </div>
-        <div className="flex justify-end gap-2 pt-1">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
-            Cancel
-          </button>
-          <button type="submit" disabled={saving || !name.trim()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2">
-            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-            Save
-          </button>
+      </Dialog>
+    );
+  }
+
+  return (
+    <Dialog
+      title="Project settings"
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" type="submit" form="project-settings" busy={saving} disabled={!name.trim()}>
+            Save changes
+          </Button>
+        </>
+      }
+    >
+      <form id="project-settings" onSubmit={save} className="flex flex-col gap-4">
+        {err && <Alert>{err}</Alert>}
+        <Field label="Name">
+          {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} disabled={saving} maxLength={120} />}
+        </Field>
+        <Field label="Description" hint="Optional. One line on what this project covers.">
+          {(p) => (
+            <Textarea {...p} value={description} onChange={(e) => setDescription(e.target.value)} disabled={saving} rows={2} maxLength={500} />
+          )}
+        </Field>
+        <div className="flex flex-col gap-2">
+          <span className="text-ui font-medium text-ink">Colour</span>
+          <ColorPicker value={color} onChange={setColor} />
         </div>
       </form>
 
-      <div className="px-5 pb-5 pt-1 border-t border-slate-100 dark:border-slate-800 mt-1">
-        <div className="flex items-center justify-between gap-3 pt-4">
-          <div>
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Delete project</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {boardCount > 0
-                ? `Remove its ${boardCount} ${boardCount === 1 ? 'board' : 'boards'} first.`
-                : 'This project is empty and can be deleted.'}
-            </p>
-          </div>
-          <button
-            onClick={remove}
-            disabled={deleting || boardCount > 0}
-            className="px-3 py-2 text-sm font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shrink-0"
-          >
-            {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-            Delete
-          </button>
+      <div className="mt-5 flex items-center justify-between gap-4 border-t border-line pb-2 pt-4">
+        <div className="min-w-0">
+          <p className="text-ui font-medium text-ink">Delete project</p>
+          <p className="text-meta text-ink-2">
+            {boardCount > 0
+              ? `Delete its ${plural(boardCount, 'board', 'boards')} first.`
+              : 'This project has no boards and can be deleted.'}
+          </p>
         </div>
+        <Button variant="danger" onClick={() => setConfirming(true)} disabled={boardCount > 0 || saving}>
+          Delete project
+        </Button>
       </div>
-    </Modal>
+    </Dialog>
   );
 }

@@ -1,2 +1,186 @@
 @import "tailwindcss";
+@import "@fontsource-variable/hanken-grotesk/wght.css";
 @custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Ink and highlighter.
+ * White paper, black ink, and one highlighter yellow that marks what is yours
+ * or new. See DESIGN.md for the rules.
+ *
+ * Colours are CSS variables that flip under `.dark`, so components use one
+ * class (`bg-paper`, `text-ink`, `border-line`) and never a `dark:` variant.
+ */
+:root {
+  --paper: #ffffff;
+  --wash: #f6f6f3;
+  --wash-2: #ecece8;
+  --line: #e6e6e1;
+  --line-strong: #cfcfc8;
+  --ink: #17171a;
+  --ink-2: #5a5a62;
+  --ink-3: #74747c;
+  --mark: #ffe45c;
+  --on-mark: #17171a;
+  --danger: #c2321f;
+  --danger-wash: #fcece9;
+  --warn: #8a5a00;
+  --warn-wash: #fbf2da;
+  --ok: #1b7f4b;
+  --scrim: rgb(23 23 26 / 0.32);
+  --shadow-pop: 0 12px 32px -12px rgb(23 23 26 / 0.28), 0 2px 6px rgb(23 23 26 / 0.06);
+  color-scheme: light;
+}
+
+.dark {
+  --paper: #121214;
+  --wash: #19191c;
+  --wash-2: #232327;
+  --line: #2a2a2f;
+  --line-strong: #3c3c43;
+  --ink: #f2f2ef;
+  --ink-2: #a8a8b0;
+  --ink-3: #8b8b94;
+  --mark: #ffe45c;
+  --on-mark: #17171a;
+  --danger: #ff8672;
+  --danger-wash: #35150f;
+  --warn: #e7b84a;
+  --warn-wash: #2e2409;
+  --ok: #5fc790;
+  --scrim: rgb(0 0 0 / 0.6);
+  --shadow-pop: 0 16px 40px -12px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(255 255 255 / 0.06);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Hanken Grotesk Variable", "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-paper: var(--paper);
+  --color-wash: var(--wash);
+  --color-wash-2: var(--wash-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-mark: var(--mark);
+  --color-on-mark: var(--on-mark);
+  --color-danger: var(--danger);
+  --color-danger-wash: var(--danger-wash);
+  --color-warn: var(--warn);
+  --color-warn-wash: var(--warn-wash);
+  --color-ok: var(--ok);
+  --color-scrim: var(--scrim);
+
+  --shadow-pop: var(--shadow-pop);
+
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1rem;
+  --text-ui: 0.875rem;
+  --text-ui--line-height: 1.25rem;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.5rem;
+  --text-lead: 1.0625rem;
+  --text-lead--line-height: 1.7rem;
+  --text-title: 1.25rem;
+  --text-title--line-height: 1.6rem;
+  --text-display: 1.875rem;
+  --text-display--line-height: 2.2rem;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@theme {
+  /* Project labels: the eight colours a person can give a project. */
+  --color-label-indigo: #3f51b5;
+  --color-label-emerald: #2f8f5b;
+  --color-label-amber: #c98a12;
+  --color-label-rose: #c8475d;
+  --color-label-sky: #2b8fc4;
+  --color-label-violet: #7b55c7;
+  --color-label-teal: #1f8f8a;
+  --color-label-slate: #74747c;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    scrollbar-color: var(--line-strong) transparent;
+    scrollbar-width: thin;
+  }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    caret-color: var(--ink);
+  }
+  ::selection {
+    background: var(--mark);
+    color: var(--on-mark);
+  }
+  :focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+  a {
+    text-underline-offset: 3px;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  ::placeholder {
+    color: var(--ink-3);
+    opacity: 1;
+  }
+  input[type="search"]::-webkit-search-cancel-button {
+    display: none;
+  }
+}
+
+@layer utilities {
+  /* The highlighter stroke. Used on the wordmark, on what is yours, and on what is new. */
+  .mark {
+    background: var(--mark);
+    color: var(--on-mark);
+    border-radius: 3px;
+    padding: 0 0.25em;
+    margin: 0 -0.1em;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* One authored moment: the highlighter sweeps across a fresh result. */
+@keyframes mark-sweep {
+  from { background-size: 0% 100%; }
+  to { background-size: 100% 100%; }
+}
+.mark-sweep {
+  background-image: linear-gradient(var(--mark), var(--mark));
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  color: var(--on-mark);
+  border-radius: 3px;
+  padding: 0 0.25em;
+  margin: 0 -0.1em;
+  animation: mark-sweep 700ms var(--ease-out) 150ms backwards;
+}
+@keyframes spin-ring {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mark-sweep { animation: none; }
+}
