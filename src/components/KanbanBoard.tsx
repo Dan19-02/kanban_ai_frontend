@@ -257,7 +257,7 @@ export function KanbanBoard({
       </div>
 
       {items.length === 0 ? (
-        <Empty title="No tasks yet">Paste a transcript above, or add a task by hand.</Empty>
+        <Empty title="No tasks yet">{canEdit ? 'Paste a transcript above, or choose Add task.' : 'Tasks appear here once the owner adds a transcript.'}</Empty>
       ) : columns.length === 0 || filteredItems.length === 0 ? (
         <Empty title="Nothing matches">Try a different search, or clear the filter.</Empty>
       ) : view === 'list' ? (
